@@ -23,6 +23,7 @@ import androidx.room.PrimaryKey
  * @property coins The user's current balance of in-app currency.
  * @property ownedAvatarIds A list of avatar IDs that the user has unlocked.
  * @property selectedAvatarId The ID of the avatar the user currently has equipped.
+ * @property themePreference The user's chosen app theme: "LIGHT", "DARK", or "SYSTEM".
  */
 @Entity(tableName = "users")
 data class UserEntity(
@@ -50,5 +51,8 @@ data class UserEntity(
     val ownedAvatarIds: List<String> = listOf("default"),
 
     @ColumnInfo(name = "selected_avatar_id")
-    val selectedAvatarId: String = "default"
+    val selectedAvatarId: String = "default",
+
+    @ColumnInfo(name = "theme_preference")
+    val themePreference: String = "SYSTEM"
 )

@@ -1,5 +1,6 @@
 package io.lifephysics.architect2.ui.viewmodel
 
+import io.lifephysics.architect2.data.Theme
 import io.lifephysics.architect2.data.db.entity.TaskEntity
 import io.lifephysics.architect2.data.db.entity.UserEntity
 
@@ -10,6 +11,9 @@ import io.lifephysics.architect2.data.db.entity.UserEntity
  * [isAddTaskSheetVisible] is the MVI flag that controls the Modal Bottom Sheet.
  * The ViewModel is the single source of truth for this state — the UI never
  * manages sheet visibility with local state.
+ *
+ * [themePreference] drives the theme applied in [MainActivity]. It defaults to
+ * [Theme.SYSTEM] so the app follows the device setting on first launch.
  */
 data class MainUiState(
     val user: UserEntity? = null,
@@ -18,5 +22,6 @@ data class MainUiState(
     val rankTitle: String = "Initializing...",
     val xpToNextLevel: Int = 1,
     val currentLevelProgress: Float = 0f,
-    val isAddTaskSheetVisible: Boolean = false
+    val isAddTaskSheetVisible: Boolean = false,
+    val themePreference: Theme = Theme.SYSTEM
 )

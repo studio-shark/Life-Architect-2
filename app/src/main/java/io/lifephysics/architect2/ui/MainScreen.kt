@@ -107,7 +107,12 @@ fun MainScreen(viewModel: MainViewModel) {
             composable(Screen.History.route) { HistoryScreen(viewModel = viewModel) }
             composable(Screen.Analytics.route) { AnalyticsScreen() }
             composable(Screen.AvatarVault.route) { AvatarVaultScreen() }
-            composable(Screen.Settings.route) { SettingsScreen() }
+            composable(Screen.Settings.route) {
+                SettingsScreen(
+                    currentTheme = uiState.themePreference,
+                    onThemeChange = { viewModel.onThemeChange(it) }
+                )
+            }
         }
     }
 }

@@ -40,6 +40,14 @@ class AppRepository(
      */
     suspend fun updateUser(user: UserEntity) = upsertUser(user)
 
+    /**
+     * Persists the user's chosen theme preference.
+     * Accepts a [Theme] enum value and stores its name as a string in the database.
+     *
+     * @param theme The theme to persist ("LIGHT", "DARK", or "SYSTEM").
+     */
+    suspend fun updateUserTheme(theme: Theme) = userDao.updateUserTheme(theme.name)
+
     // --- Goal Functions ---
 
     fun observeGoalsForUser(userId: String): Flow<List<GoalEntity>> = goalDao.observeGoalsForUser(userId)

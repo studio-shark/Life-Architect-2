@@ -25,10 +25,15 @@ import io.lifephysics.architect2.data.db.entity.UserEntity
  * Foreign key constraints are disabled via a SQLite pragma for the offline-first build
  * so that tasks can be inserted without a matching goal or user row already existing.
  * Re-enable them once Google Sign-In and the Goals feature are fully wired up.
+ *
+ * [fallbackToDestructiveMigration] is enabled during development so that schema
+ * changes (such as adding new columns) automatically wipe and recreate the database
+ * rather than crashing. Remove this before production release and replace with
+ * proper [androidx.room.migration.Migration] objects.
  */
 @Database(
     entities = [UserEntity::class, GoalEntity::class, TaskEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -64,6 +69,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "life_architect_database"
                 )
+                    .fallbackToDestructiveMigration() // Dev only — replace with Migration before release
                     .addCallback(DISABLE_FOREIGN_KEYS)
                     .build()
                 INSTANCE = instance

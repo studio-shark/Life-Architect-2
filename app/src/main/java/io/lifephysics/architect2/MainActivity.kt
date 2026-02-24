@@ -4,12 +4,16 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.lifephysics.architect2.data.Theme
 import io.lifephysics.architect2.ui.MainScreen
-import io.lifephysics.architect2.ui.theme.LifeArchitect2Theme
+import io.lifephysics.architect2.ui.theme.AppTheme
 import io.lifephysics.architect2.ui.viewmodel.MainViewModel
 import io.lifephysics.architect2.ui.viewmodel.MainViewModelFactory
 
@@ -26,12 +30,25 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            LifeArchitect2Theme {
+            // Collect the UI state to read the user's theme preference
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val systemDark = isSystemInDarkTheme()
+
+            // Resolve the effective dark/light boolean:
+            // SYSTEM  → follow the Android device setting (default on first launch)
+            // DARK    → always dark
+            // LIGHT   → always light
+            val isDarkTheme = when (uiState.themePreference) {
+                Theme.DARK   -> true
+                Theme.LIGHT  -> false
+                Theme.SYSTEM -> systemDark
+            }
+
+            AppTheme(darkTheme = isDarkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Pass the ViewModel instance to our MainScreen
                     MainScreen(viewModel = viewModel)
                 }
             }

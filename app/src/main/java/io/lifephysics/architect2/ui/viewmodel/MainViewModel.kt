@@ -3,6 +3,7 @@ package io.lifephysics.architect2.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.lifephysics.architect2.data.AppRepository
+import io.lifephysics.architect2.data.Theme
 import io.lifephysics.architect2.data.db.entity.TaskEntity
 import io.lifephysics.architect2.data.db.entity.UserEntity
 import io.lifephysics.architect2.domain.TaskDifficulty
@@ -47,7 +48,8 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
                     currentLevelProgress = if (totalXpForThisLevel > 0)
                         (xpInCurrentLevel.toFloat() / totalXpForThisLevel.toFloat()).coerceIn(0f, 1f)
                     else 0f,
-                    isAddTaskSheetVisible = _uiState.value.isAddTaskSheetVisible
+                    isAddTaskSheetVisible = _uiState.value.isAddTaskSheetVisible,
+                    themePreference = Theme.valueOf(user?.themePreference ?: Theme.SYSTEM.name)
                 )
             }.collect { state ->
                 _uiState.value = state
@@ -104,6 +106,16 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
 
     fun onDismissAddTaskSheet() {
         _uiState.update { it.copy(isAddTaskSheetVisible = false) }
+    }
+
+    /**
+     * Persists the user's chosen theme preference to the database.
+     * The UI will recompose automatically via the StateFlow.
+     */
+    fun onThemeChange(theme: Theme) {
+        viewModelScope.launch {
+            repository.updateUserTheme(theme)
+        }
     }
 
     /**

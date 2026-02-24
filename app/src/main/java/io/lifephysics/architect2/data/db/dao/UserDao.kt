@@ -38,4 +38,14 @@ interface UserDao {
      */
     @Query("SELECT * FROM users WHERE google_id = 'local_user' LIMIT 1")
     fun getLocalUser(): Flow<UserEntity?>
+
+    /**
+     * Updates the theme preference for the local offline-first user.
+     * Accepts a string value matching the [io.lifephysics.architect2.data.Theme] enum name
+     * ("LIGHT", "DARK", or "SYSTEM").
+     *
+     * @param theme The name of the theme to persist.
+     */
+    @Query("UPDATE users SET theme_preference = :theme WHERE google_id = 'local_user'")
+    suspend fun updateUserTheme(theme: String)
 }
