@@ -5,14 +5,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.lifephysics.architect2.data.Theme
 import io.lifephysics.architect2.ui.MainScreen
+import io.lifephysics.architect2.ui.composables.XpPopup
 import io.lifephysics.architect2.ui.theme.AppTheme
 import io.lifephysics.architect2.ui.viewmodel.MainViewModel
 import io.lifephysics.architect2.ui.viewmodel.MainViewModelFactory
@@ -49,7 +52,20 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainScreen(viewModel = viewModel)
+                    // Stack the XP pop-up on top of the entire app using a Box
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        MainScreen(viewModel = viewModel)
+
+                        // XP pop-up overlay — shown at the center of the screen
+                        if (uiState.xpPopupVisible) {
+                            XpPopup(
+                                amount = uiState.xpPopupAmount,
+                                isCritical = uiState.xpPopupIsCritical,
+                                onDismiss = { viewModel.onDismissXpPopup() },
+                                modifier = Modifier.align(Alignment.Center)
+                            )
+                        }
+                    }
                 }
             }
         }

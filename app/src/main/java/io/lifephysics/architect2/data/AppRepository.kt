@@ -62,6 +62,12 @@ class AppRepository(
 
     fun observePendingTasksForUser(userId: String): Flow<List<TaskEntity>> = taskDao.observePendingTasksForUser(userId)
 
+    /**
+     * Observes all completed tasks for the local offline-first user,
+     * ordered by completion date descending (most recently completed first).
+     */
+    fun getCompletedTasks(): Flow<List<TaskEntity>> = taskDao.observeCompletedTasksForUser("local_user")
+
     suspend fun upsertTask(task: TaskEntity) = taskDao.upsertTask(task)
 
     suspend fun deleteTask(taskId: String) = taskDao.deleteTaskById(taskId)

@@ -35,3 +35,7 @@ val BrandAmber            = Color(0xFFF59E0B) // Warnings, badges, coins
 val BrandOrange           = Color(0xFFF97316) // Highlights, special labels
 val BrandBlue             = Color(0xFF3B82F6) // Information, links
 val BrandError            = Color(0xFFEF4444) // Errors, destructive actions
+
+// --- Task Action Button Colors ---
+val Green  = Color(0xFF1DB954) // "Add Quest" button
+val Purple = Color(0xFF7C3AED) // "Add to Calendar" button

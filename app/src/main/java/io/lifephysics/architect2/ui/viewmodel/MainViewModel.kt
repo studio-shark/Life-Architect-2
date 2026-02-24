@@ -6,7 +6,8 @@ import io.lifephysics.architect2.data.AppRepository
 import io.lifephysics.architect2.data.Theme
 import io.lifephysics.architect2.data.db.entity.TaskEntity
 import io.lifephysics.architect2.data.db.entity.UserEntity
-import io.lifephysics.architect2.domain.TaskDifficulty
+import io.lifephysics.architect2.domain.TaskDifficulty // <-- FIX: ADD THIS IMPORT
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.floor
 import kotlin.math.pow
+import kotlin.random.Random
 
 class MainViewModel(private val repository: AppRepository) : ViewModel() {
 
@@ -24,13 +26,11 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            // Seed the database with a local user on first launch if none exists
             val existingUser = repository.getUser().first()
             if (existingUser == null) {
                 repository.updateUser(UserEntity())
             }
 
-            // Combine the user and tasks flows into a single UI state update
             combine(repository.getUser(), repository.getAllTasks()) { user, tasks ->
                 val level = user?.level ?: 1
                 val xp = user?.xp ?: 0
@@ -41,15 +41,19 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
 
                 MainUiState(
                     user = user,
-                    tasks = tasks.sortedBy { it.isCompleted },
+                    pendingTasks = tasks.filter { !it.isCompleted },
+                    completedTasks = tasks.filter { it.isCompleted }
+                        .sortedByDescending { it.completedAt },
                     isLoading = false,
                     rankTitle = getRankTitle(level),
                     xpToNextLevel = xpNeededForNextLevel,
                     currentLevelProgress = if (totalXpForThisLevel > 0)
                         (xpInCurrentLevel.toFloat() / totalXpForThisLevel.toFloat()).coerceIn(0f, 1f)
                     else 0f,
-                    isAddTaskSheetVisible = _uiState.value.isAddTaskSheetVisible,
-                    themePreference = Theme.valueOf(user?.themePreference ?: Theme.SYSTEM.name)
+                    themePreference = Theme.valueOf(user?.themePreference ?: Theme.SYSTEM.name),
+                    xpPopupVisible = _uiState.value.xpPopupVisible,
+                    xpPopupAmount = _uiState.value.xpPopupAmount,
+                    xpPopupIsCritical = _uiState.value.xpPopupIsCritical
                 )
             }.collect { state ->
                 _uiState.value = state
@@ -59,10 +63,17 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
 
     fun onTaskCompleted(task: TaskEntity) = viewModelScope.launch {
         val user = _uiState.value.user ?: return@launch
-        // Parse the difficulty string back to the enum to get the XP value
         val difficulty = TaskDifficulty.valueOf(task.difficulty)
-        val xpGained = difficulty.xpValue
-        val coinsGained = xpGained // Simple 1:1 mapping
+        val baseXp = difficulty.xpValue
+
+        val isCritical = Random.nextFloat() < 0.20f
+        val xpGained = if (isCritical) {
+            val multiplier = 1.5f + Random.nextFloat() * 1.5f
+            (baseXp * multiplier).toInt()
+        } else {
+            baseXp
+        }
+        val coinsGained = xpGained
 
         val updatedUser = checkLevelUp(
             user.copy(
@@ -73,6 +84,8 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
         )
         repository.updateUser(updatedUser)
         repository.updateTask(task.copy(isCompleted = true, completedAt = System.currentTimeMillis()))
+
+        showXpPopup(amount = xpGained, isCritical = isCritical)
     }
 
     fun onTaskReverted(task: TaskEntity) = viewModelScope.launch {
@@ -88,40 +101,43 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
         )
         repository.updateUser(updatedUser)
         repository.updateTask(task.copy(isCompleted = false, completedAt = null))
+
+        showXpPopup(amount = -xpLost, isCritical = false)
     }
 
-    fun onAddTask(title: String, difficulty: TaskDifficulty) = viewModelScope.launch {
+    fun onAddTask(title: String, difficulty: TaskDifficulty = TaskDifficulty.MEDIUM) = viewModelScope.launch {
         val newTask = TaskEntity(
             title = title,
-            difficulty = difficulty.name, // Store enum name as String
+            difficulty = difficulty.name, // <-- This now resolves correctly
             userId = _uiState.value.user?.googleId ?: "local_user"
         )
         repository.insertTask(newTask)
-        onDismissAddTaskSheet()
     }
 
-    fun onShowAddTaskSheet() {
-        _uiState.update { it.copy(isAddTaskSheetVisible = true) }
-    }
-
-    fun onDismissAddTaskSheet() {
-        _uiState.update { it.copy(isAddTaskSheetVisible = false) }
-    }
-
-    /**
-     * Persists the user's chosen theme preference to the database.
-     * The UI will recompose automatically via the StateFlow.
-     */
     fun onThemeChange(theme: Theme) {
         viewModelScope.launch {
             repository.updateUserTheme(theme)
         }
     }
 
-    /**
-     * Checks whether the user has accumulated enough XP to level up,
-     * and increments the level until they have not.
-     */
+    fun onDismissXpPopup() {
+        _uiState.update { it.copy(xpPopupVisible = false) }
+    }
+
+    private fun showXpPopup(amount: Int, isCritical: Boolean) {
+        _uiState.update {
+            it.copy(
+                xpPopupVisible = true,
+                xpPopupAmount = amount,
+                xpPopupIsCritical = isCritical
+            )
+        }
+        viewModelScope.launch {
+            delay(2000)
+            onDismissXpPopup()
+        }
+    }
+
     private fun checkLevelUp(user: UserEntity): UserEntity {
         var current = user
         while (current.xp >= getXpNeededForLevel(current.level)) {

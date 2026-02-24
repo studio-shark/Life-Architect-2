@@ -21,7 +21,8 @@ interface TaskDao {
     suspend fun upsertTask(task: TaskEntity)
 
     /**
-     * Observes all tasks for a specific user, ordered by creation date.
+     * Observes all tasks for a specific user, ordered by creation date descending.
+     * Used by [AppRepository.getAllTasks] to feed the ViewModel's combined flow.
      *
      * @param userId The ID of the user whose tasks are to be observed.
      * @return A [Flow] emitting a list of all [TaskEntity] for the user.
@@ -31,12 +32,23 @@ interface TaskDao {
 
     /**
      * Observes all pending (not completed) tasks for a specific user.
+     * Uses the [TaskEntity.status] string field for legacy compatibility.
      *
      * @param userId The ID of the user whose pending tasks are to be observed.
      * @return A [Flow] emitting a list of pending [TaskEntity] for the user.
      */
     @Query("SELECT * FROM tasks WHERE user_id = :userId AND status = 'pending' ORDER BY created_at DESC")
     fun observePendingTasksForUser(userId: String): Flow<List<TaskEntity>>
+
+    /**
+     * Observes all completed tasks for a specific user, ordered by completion date descending.
+     * Uses the [TaskEntity.isCompleted] boolean field set by [MainViewModel.onTaskCompleted].
+     *
+     * @param userId The ID of the user whose completed tasks are to be observed.
+     * @return A [Flow] emitting a list of completed [TaskEntity] for the user.
+     */
+    @Query("SELECT * FROM tasks WHERE user_id = :userId AND is_completed = 1 ORDER BY completed_at DESC")
+    fun observeCompletedTasksForUser(userId: String): Flow<List<TaskEntity>>
 
     /**
      * Deletes a specific task by its ID.
