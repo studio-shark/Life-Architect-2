@@ -1,91 +1,90 @@
 package io.lifephysics.architect2.data
 
 import io.lifephysics.architect2.data.db.dao.GoalDao
+import io.lifephysics.architect2.data.db.dao.OwnedAvatarDao
 import io.lifephysics.architect2.data.db.dao.TaskDao
 import io.lifephysics.architect2.data.db.dao.UserDao
 import io.lifephysics.architect2.data.db.entity.GoalEntity
+import io.lifephysics.architect2.data.db.entity.OwnedAvatarEntity
 import io.lifephysics.architect2.data.db.entity.TaskEntity
 import io.lifephysics.architect2.data.db.entity.UserEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 
 /**
  * Repository module for handling data operations.
- *
- * This class abstracts access to multiple data sources (in this case, only the Room DAOs)
- * and provides a clean API for the rest of the application to access data.
- * It is the single source of truth for all application data.
+ * Single source of truth for all application data.
  */
 class AppRepository(
     private val userDao: UserDao,
     private val goalDao: GoalDao,
-    private val taskDao: TaskDao
+    private val taskDao: TaskDao,
+    private val ownedAvatarDao: OwnedAvatarDao
 ) {
 
-    // --- User Functions ---
+    // --- User ---
 
     fun observeUser(googleId: String): Flow<UserEntity?> = userDao.observeUser(googleId)
-
-    suspend fun upsertUser(user: UserEntity) = userDao.upsertUser(user)
-
-    // --- User convenience wrappers used by MainViewModel (offline-first) ---
-
-    /**
-     * Observes the local offline-first user. Delegates to [UserDao.getLocalUser].
-     * Used by [MainViewModel] before Google Sign-In is wired up.
-     */
     fun getUser(): Flow<UserEntity?> = userDao.getLocalUser()
-
-    /**
-     * Updates the local user. Delegates to [upsertUser].
-     */
+    suspend fun upsertUser(user: UserEntity) = userDao.upsertUser(user)
     suspend fun updateUser(user: UserEntity) = upsertUser(user)
-
-    /**
-     * Persists the user's chosen theme preference.
-     * Accepts a [Theme] enum value and stores its name as a string in the database.
-     *
-     * @param theme The theme to persist ("LIGHT", "DARK", or "SYSTEM").
-     */
     suspend fun updateUserTheme(theme: Theme) = userDao.updateUserTheme(theme.name)
 
-    // --- Goal Functions ---
+    // --- Goals ---
 
     fun observeGoalsForUser(userId: String): Flow<List<GoalEntity>> = goalDao.observeGoalsForUser(userId)
-
     suspend fun upsertGoal(goal: GoalEntity) = goalDao.upsertGoal(goal)
-
     suspend fun deleteGoal(goalId: String) = goalDao.deleteGoalById(goalId)
 
-    // --- Task Functions ---
+    // --- Tasks ---
 
     fun observeTasksForUser(userId: String): Flow<List<TaskEntity>> = taskDao.observeTasksForUser(userId)
-
     fun observePendingTasksForUser(userId: String): Flow<List<TaskEntity>> = taskDao.observePendingTasksForUser(userId)
-
-    /**
-     * Observes all completed tasks for the local offline-first user,
-     * ordered by completion date descending (most recently completed first).
-     */
     fun getCompletedTasks(): Flow<List<TaskEntity>> = taskDao.observeCompletedTasksForUser("local_user")
-
+    fun getAllTasks(): Flow<List<TaskEntity>> = observeTasksForUser("local_user")
     suspend fun upsertTask(task: TaskEntity) = taskDao.upsertTask(task)
-
+    suspend fun insertTask(task: TaskEntity) = upsertTask(task)
+    suspend fun updateTask(task: TaskEntity) = upsertTask(task)
     suspend fun deleteTask(taskId: String) = taskDao.deleteTaskById(taskId)
 
-    // --- Task convenience wrappers used by MainViewModel ---
+    // --- Avatar Shop ---
 
     /**
-     * Returns all tasks for the local offline-first user. Delegates to [observeTasksForUser].
+     * Observes the list of avatar IDs owned by the local user as a reactive Flow.
+     * The Shop screen will automatically update when a new avatar is purchased.
      */
-    fun getAllTasks(): Flow<List<TaskEntity>> = observeTasksForUser("local_user")
+    fun getOwnedAvatarIds(): Flow<List<Int>> =
+        ownedAvatarDao.observeOwnedAvatarIds("local_user")
 
     /**
-     * Inserts or updates a task. Delegates to [upsertTask].
+     * Purchases an avatar for the local user.
+     *
+     * This is an atomic operation:
+     *   1. Deducts the avatar's price from the user's coin balance.
+     *   2. Inserts an ownership record into [OwnedAvatarEntity].
+     *
+     * The caller (ViewModel) is responsible for verifying the user has sufficient
+     * coins before calling this method.
+     *
+     * @param avatarId The ID of the avatar to purchase.
+     * @param price    The coin cost to deduct from the user's balance.
      */
-    suspend fun insertTask(task: TaskEntity) = upsertTask(task)
+    suspend fun purchaseAvatar(avatarId: Int, price: Int) {
+        val user = getUser().first() ?: return
+        val updatedUser = user.copy(coins = user.coins - price)
+        upsertUser(updatedUser)
+        ownedAvatarDao.insertOwnedAvatar(
+            OwnedAvatarEntity(userId = "local_user", avatarId = avatarId)
+        )
+    }
 
     /**
-     * Updates an existing task. Delegates to [upsertTask].
+     * Sets the given avatar as the user's currently equipped avatar.
+     *
+     * @param avatarId The ID of the avatar to equip.
      */
-    suspend fun updateTask(task: TaskEntity) = upsertTask(task)
+    suspend fun equipAvatar(avatarId: Int) {
+        val user = getUser().first() ?: return
+        upsertUser(user.copy(equippedAvatarId = avatarId))
+    }
 }

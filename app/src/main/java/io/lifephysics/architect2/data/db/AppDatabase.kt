@@ -7,33 +7,34 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
 import io.lifephysics.architect2.data.db.dao.GoalDao
+import io.lifephysics.architect2.data.db.dao.OwnedAvatarDao
 import io.lifephysics.architect2.data.db.dao.TaskDao
 import io.lifephysics.architect2.data.db.dao.UserDao
 import io.lifephysics.architect2.data.db.entity.GoalEntity
+import io.lifephysics.architect2.data.db.entity.OwnedAvatarEntity
 import io.lifephysics.architect2.data.db.entity.TaskEntity
 import io.lifephysics.architect2.data.db.entity.UserEntity
 
 /**
  * The main Room database for the application.
  *
- * This class is the central access point to the persisted data. It lists all the
- * entities (tables) and provides abstract methods to get the DAOs.
+ * Version history:
+ *   1 — Initial schema
+ *   2 — Added task completion fields
+ *   3 — Added OwnedAvatarEntity table; replaced ownedAvatarIds/selectedAvatarId
+ *       String columns in UserEntity with equippedAvatarId: Int
  *
- * The singleton pattern in [getDatabase] ensures only one instance of the database
- * is ever created, preventing data corruption from multiple open connections.
- *
- * Foreign key constraints are disabled via a SQLite pragma for the offline-first build
- * so that tasks can be inserted without a matching goal or user row already existing.
- * Re-enable them once Google Sign-In and the Goals feature are fully wired up.
- *
- * [fallbackToDestructiveMigration] is enabled during development so that schema
- * changes (such as adding new columns) automatically wipe and recreate the database
- * rather than crashing. Remove this before production release and replace with
- * proper [androidx.room.migration.Migration] objects.
+ * [fallbackToDestructiveMigration] is enabled during development.
+ * Replace with proper Migration objects before production release.
  */
 @Database(
-    entities = [UserEntity::class, GoalEntity::class, TaskEntity::class],
-    version = 2,
+    entities = [
+        UserEntity::class,
+        GoalEntity::class,
+        TaskEntity::class,
+        OwnedAvatarEntity::class
+    ],
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -42,13 +43,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun goalDao(): GoalDao
     abstract fun taskDao(): TaskDao
+    abstract fun ownedAvatarDao(): OwnedAvatarDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
-        // Disables foreign key enforcement on every new database connection.
-        // This allows tasks to be inserted without a matching goal/user row.
         private val DISABLE_FOREIGN_KEYS = object : RoomDatabase.Callback() {
             override fun onOpen(db: SupportSQLiteDatabase) {
                 super.onOpen(db)
@@ -56,12 +56,6 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        /**
-         * Returns the singleton instance of [AppDatabase], creating it if necessary.
-         * The [synchronized] block ensures thread-safe creation on first access.
-         *
-         * @param context The application context used to build the database.
-         */
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -69,7 +63,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "life_architect_database"
                 )
-                    .fallbackToDestructiveMigration() // Dev only — replace with Migration before release
+                    .fallbackToDestructiveMigration()
                     .addCallback(DISABLE_FOREIGN_KEYS)
                     .build()
                 INSTANCE = instance
