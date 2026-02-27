@@ -7,34 +7,27 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
 import io.lifephysics.architect2.data.db.dao.GoalDao
-import io.lifephysics.architect2.data.db.dao.OwnedAvatarDao
 import io.lifephysics.architect2.data.db.dao.TaskDao
 import io.lifephysics.architect2.data.db.dao.UserDao
 import io.lifephysics.architect2.data.db.entity.GoalEntity
-import io.lifephysics.architect2.data.db.entity.OwnedAvatarEntity
 import io.lifephysics.architect2.data.db.entity.TaskEntity
 import io.lifephysics.architect2.data.db.entity.UserEntity
 
 /**
- * The main Room database for the application.
- *
  * Version history:
  *   1 — Initial schema
  *   2 — Added task completion fields
- *   3 — Added OwnedAvatarEntity table; replaced ownedAvatarIds/selectedAvatarId
- *       String columns in UserEntity with equippedAvatarId: Int
- *
- * [fallbackToDestructiveMigration] is enabled during development.
- * Replace with proper Migration objects before production release.
+ *   3 — Added OwnedAvatarEntity; replaced ownedAvatarIds/selectedAvatarId with equippedAvatarId
+ *   4 — Replaced OwnedAvatarEntity with OwnedPartEntity; replaced equippedAvatarId with avatarConfig string
+ *   5 — Removed OwnedPartEntity and coins column (shop system decommissioned)
  */
 @Database(
     entities = [
         UserEntity::class,
         GoalEntity::class,
-        TaskEntity::class,
-        OwnedAvatarEntity::class
+        TaskEntity::class
     ],
-    version = 3,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -43,7 +36,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun goalDao(): GoalDao
     abstract fun taskDao(): TaskDao
-    abstract fun ownedAvatarDao(): OwnedAvatarDao
 
     companion object {
         @Volatile

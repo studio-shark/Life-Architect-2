@@ -28,8 +28,7 @@ class LifeArchitectApplication : Application() {
         AppRepository(
             userDao = database.userDao(),
             goalDao = database.goalDao(),
-            taskDao = database.taskDao(),
-            ownedAvatarDao = database.ownedAvatarDao()
+            taskDao = database.taskDao()
         )
     }
 }

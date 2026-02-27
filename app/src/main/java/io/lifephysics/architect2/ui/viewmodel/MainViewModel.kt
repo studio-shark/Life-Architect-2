@@ -1,13 +1,15 @@
 package io.lifephysics.architect2.ui.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.lifephysics.architect2.data.AppRepository
 import io.lifephysics.architect2.data.Theme
+import io.lifephysics.architect2.data.TrendsRepository
 import io.lifephysics.architect2.data.db.entity.TaskEntity
 import io.lifephysics.architect2.data.db.entity.UserEntity
-import io.lifephysics.architect2.domain.Avatar
 import io.lifephysics.architect2.domain.TaskDifficulty
+import io.lifephysics.architect2.domain.TrendItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,25 +22,33 @@ import kotlin.math.floor
 import kotlin.math.pow
 import kotlin.random.Random
 
-class MainViewModel(private val repository: AppRepository) : ViewModel() {
+class MainViewModel(
+    private val repository: AppRepository,
+    private val trendsRepository: TrendsRepository,
+    private val appContext: Context
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
+
+    private val prefs by lazy {
+        appContext.getSharedPreferences("life_architect_prefs", Context.MODE_PRIVATE)
+    }
+
+    private val _trendsUiState = MutableStateFlow(TrendsUiState())
+    val trendsUiState: StateFlow<TrendsUiState> = _trendsUiState.asStateFlow()
 
     init {
         viewModelScope.launch {
             val existingUser = repository.getUser().first()
             if (existingUser == null) {
                 repository.updateUser(UserEntity())
-                // Grant the free starter avatar on first launch
-                repository.purchaseAvatar(avatarId = 1, price = 0)
             }
 
             combine(
                 repository.getUser(),
-                repository.getAllTasks(),
-                repository.getOwnedAvatarIds()
-            ) { user, tasks, ownedIds ->
+                repository.getAllTasks()
+            ) { user, tasks ->
                 val level = user?.level ?: 1
                 val xp = user?.xp ?: 0
                 val xpNeededForCurrentLevel = getXpNeededForLevel(level - 1)
@@ -58,21 +68,18 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
                         (xpInCurrentLevel.toFloat() / totalXpForThisLevel.toFloat()).coerceIn(0f, 1f)
                     else 0f,
                     themePreference = Theme.valueOf(user?.themePreference ?: Theme.SYSTEM.name),
-                    // Preserve pop-up states across recompositions
                     xpPopupVisible = _uiState.value.xpPopupVisible,
                     xpPopupAmount = _uiState.value.xpPopupAmount,
-                    xpPopupIsCritical = _uiState.value.xpPopupIsCritical,
-                    coinPopupVisible = _uiState.value.coinPopupVisible,
-                    coinPopupAmount = _uiState.value.coinPopupAmount,
-                    coinPopupIsCritical = _uiState.value.coinPopupIsCritical,
-                    // Avatar state
-                    ownedAvatarIds = if (ownedIds.isEmpty()) listOf(1) else ownedIds,
-                    equippedAvatarId = user?.equippedAvatarId ?: 1
+                    xpPopupIsCritical = _uiState.value.xpPopupIsCritical
                 )
             }.collect { state ->
                 _uiState.value = state
             }
         }
+
+        val savedCountry = prefs.getString("trends_country", null)
+        _trendsUiState.update { it.copy(selectedCountry = savedCountry) }
+        loadTrends(savedCountry)
     }
 
     // --- Task Actions ---
@@ -88,17 +95,10 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
             (baseXp * multiplier).toInt()
         } else baseXp
 
-        val isCoinCritical = Random.nextFloat() < 0.15f
-        val coinsGained = if (isCoinCritical) {
-            val multiplier = 3f + Random.nextFloat() * 2f
-            (baseXp * multiplier).toInt()
-        } else baseXp
-
         val updatedUser = checkLevelUp(
             user.copy(
                 xp = user.xp + xpGained,
-                totalXp = user.totalXp + xpGained,
-                coins = user.coins + coinsGained
+                totalXp = user.totalXp + xpGained
             )
         )
         repository.updateUser(updatedUser)
@@ -107,21 +107,16 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
         showXpPopup(amount = xpGained, isCritical = isXpCritical)
         delay(1800)
         onDismissXpPopup()
-        showCoinPopup(amount = coinsGained, isCritical = isCoinCritical)
-        delay(2000)
-        onDismissCoinPopup()
     }
 
     fun onTaskReverted(task: TaskEntity) = viewModelScope.launch {
         val user = _uiState.value.user ?: return@launch
         val difficulty = TaskDifficulty.valueOf(task.difficulty)
         val xpLost = difficulty.xpValue
-        val coinsLost = xpLost
 
         val updatedUser = user.copy(
             xp = (user.xp - xpLost).coerceAtLeast(0),
-            totalXp = (user.totalXp - xpLost).coerceAtLeast(0),
-            coins = (user.coins - coinsLost).coerceAtLeast(0)
+            totalXp = (user.totalXp - xpLost).coerceAtLeast(0)
         )
         repository.updateUser(updatedUser)
         repository.updateTask(task.copy(isCompleted = false, completedAt = null))
@@ -129,9 +124,6 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
         showXpPopup(amount = -xpLost, isCritical = false)
         delay(1800)
         onDismissXpPopup()
-        showCoinPopup(amount = -coinsLost, isCritical = false)
-        delay(2000)
-        onDismissCoinPopup()
     }
 
     fun onAddTask(title: String, difficulty: TaskDifficulty = TaskDifficulty.MEDIUM) = viewModelScope.launch {
@@ -147,39 +139,45 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
         repository.updateUserTheme(theme)
     }
 
-    // --- Avatar Shop Actions ---
+    // --- Trends Actions ---
 
-    /**
-     * Attempts to purchase an avatar.
-     * Silently returns if the user cannot afford it or already owns it.
-     */
-    fun onPurchaseAvatar(avatar: Avatar) = viewModelScope.launch {
-        val state = _uiState.value
-        val user = state.user ?: return@launch
-        if (avatar.id in state.ownedAvatarIds) return@launch
-        if (user.coins < avatar.price) return@launch
-        repository.purchaseAvatar(avatarId = avatar.id, price = avatar.price)
-    }
+    fun loadTrends(countryCode: String?) = viewModelScope.launch {
+        _trendsUiState.update { it.copy(isLoading = true, error = null) }
+        prefs.edit().putString("trends_country", countryCode).apply()
 
-    /**
-     * Equips an owned avatar. Silently returns if the avatar is not owned.
-     */
-    fun onEquipAvatar(avatar: Avatar) = viewModelScope.launch {
-        val state = _uiState.value
-        if (avatar.id !in state.ownedAvatarIds) return@launch
-        repository.equipAvatar(avatarId = avatar.id)
+        val result = trendsRepository.getTrends(countryCode)
+
+        if (result.isEmpty()) {
+            _trendsUiState.update {
+                it.copy(
+                    isLoading = false,
+                    error = "Could not load trends. Check your connection and try again."
+                )
+            }
+        } else {
+            _trendsUiState.update {
+                it.copy(
+                    isLoading = false,
+                    trends = result,
+                    selectedCountry = countryCode,
+                    error = null
+                )
+            }
+        }
     }
 
     // --- Pop-up State Handlers ---
 
     fun onDismissXpPopup() = _uiState.update { it.copy(xpPopupVisible = false) }
-    fun onDismissCoinPopup() = _uiState.update { it.copy(coinPopupVisible = false) }
 
     private fun showXpPopup(amount: Int, isCritical: Boolean) =
-        _uiState.update { it.copy(xpPopupVisible = true, xpPopupAmount = amount, xpPopupIsCritical = isCritical) }
-
-    private fun showCoinPopup(amount: Int, isCritical: Boolean) =
-        _uiState.update { it.copy(coinPopupVisible = true, coinPopupAmount = amount, coinPopupIsCritical = isCritical) }
+        _uiState.update {
+            it.copy(
+                xpPopupVisible = true,
+                xpPopupAmount = amount,
+                xpPopupIsCritical = isCritical
+            )
+        }
 
     // --- Private Helpers ---
 
@@ -197,9 +195,16 @@ class MainViewModel(private val repository: AppRepository) : ViewModel() {
     }
 
     private fun getRankTitle(level: Int): String = when {
-        level < 5 -> "Fragment Seeker"
+        level < 5  -> "Fragment Seeker"
         level < 10 -> "Momentum Builder"
         level < 20 -> "Pattern Mapper"
-        else -> "System Architect"
+        else       -> "System Architect"
     }
 }
+
+data class TrendsUiState(
+    val trends: List<TrendItem> = emptyList(),
+    val isLoading: Boolean = false,
+    val error: String? = null,
+    val selectedCountry: String? = null
+)

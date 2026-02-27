@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.lifephysics.architect2.data.Theme
+import io.lifephysics.architect2.data.TrendsRepository
 import io.lifephysics.architect2.ui.MainScreen
 import io.lifephysics.architect2.ui.composables.XpPopup
 import io.lifephysics.architect2.ui.theme.AppTheme
@@ -22,25 +23,23 @@ import io.lifephysics.architect2.ui.viewmodel.MainViewModelFactory
 
 class MainActivity : ComponentActivity() {
 
-    // Get the repository instance from the Application class
     private val repository by lazy { (application as LifeArchitectApplication).repository }
+    private val trendsRepository by lazy { TrendsRepository() }
 
-    // Create the ViewModel using our custom factory
     private val viewModel: MainViewModel by viewModels {
-        MainViewModelFactory(repository)
+        MainViewModelFactory(
+            repository = repository,
+            trendsRepository = trendsRepository,
+            appContext = applicationContext
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            // Collect the UI state to read the user's theme preference
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val systemDark = isSystemInDarkTheme()
 
-            // Resolve the effective dark/light boolean:
-            // SYSTEM  → follow the Android device setting (default on first launch)
-            // DARK    → always dark
-            // LIGHT   → always light
             val isDarkTheme = when (uiState.themePreference) {
                 Theme.DARK   -> true
                 Theme.LIGHT  -> false
@@ -52,11 +51,9 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Stack the XP pop-up on top of the entire app using a Box
                     Box(modifier = Modifier.fillMaxSize()) {
                         MainScreen(viewModel = viewModel)
 
-                        // XP pop-up overlay — shown at the center of the screen
                         if (uiState.xpPopupVisible) {
                             XpPopup(
                                 amount = uiState.xpPopupAmount,

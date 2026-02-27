@@ -17,14 +17,5 @@ data class MainUiState(
     // XP Pop-up State
     val xpPopupVisible: Boolean = false,
     val xpPopupAmount: Int = 0,
-    val xpPopupIsCritical: Boolean = false,
-
-    // Coin Pop-up State
-    val coinPopupVisible: Boolean = false,
-    val coinPopupAmount: Int = 0,
-    val coinPopupIsCritical: Boolean = false,
-
-    // Avatar Shop State
-    val ownedAvatarIds: List<Int> = listOf(1), // Avatar 1 is always owned (free starter)
-    val equippedAvatarId: Int = 1
+    val xpPopupIsCritical: Boolean = false
 )
