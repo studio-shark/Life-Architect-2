@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Card
@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.lifephysics.architect2.domain.TrendItem
+import io.lifephysics.architect2.ui.composables.AdmobBanner
 import io.lifephysics.architect2.ui.viewmodel.TrendsUiState
 
 @Composable
@@ -94,9 +95,42 @@ fun TrendingScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(trendsUiState.trends) { trend ->
-                        TrendCard(trend = trend)
+                    // Banner ad at the top, styled to match TrendCard
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            AdmobBanner(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp)
+                            )
+                        }
                     }
+
+                    itemsIndexed(trendsUiState.trends) { index, trend ->
+                        TrendCard(trend = trend)
+
+                        // Insert a banner ad after every 10th card, also card-styled
+                        if ((index + 1) % 10 == 0) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            ) {
+                                AdmobBanner(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(8.dp)
+                                )
+                            }
+                        }
+                    }
+
                     item { Spacer(modifier = Modifier.height(16.dp)) }
                 }
             }

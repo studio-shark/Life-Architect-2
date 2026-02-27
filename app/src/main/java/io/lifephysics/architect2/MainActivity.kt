@@ -1,6 +1,7 @@
 package io.lifephysics.architect2
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -13,6 +14,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.android.gms.ads.MobileAds
+import com.google.android.ump.ConsentInformation
+import com.google.android.ump.ConsentRequestParameters
+import com.google.android.ump.UserMessagingPlatform
 import io.lifephysics.architect2.data.Theme
 import io.lifephysics.architect2.data.TrendsRepository
 import io.lifephysics.architect2.ui.MainScreen
@@ -34,8 +39,38 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private lateinit var consentInformation: ConsentInformation
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // --- AdMob: Request consent and initialize SDK ---
+        consentInformation = UserMessagingPlatform.getConsentInformation(this)
+
+        val params = ConsentRequestParameters.Builder()
+            .setTagForUnderAgeOfConsent(false)
+            .build()
+
+        consentInformation.requestConsentInfoUpdate(
+            this,
+            params,
+            {
+                // Consent info updated successfully — show form if required
+                UserMessagingPlatform.loadAndShowConsentFormIfRequired(this) { formError ->
+                    if (formError != null) {
+                        Log.w("AdMob", "Consent form error: ${formError.message}")
+                    }
+                    // Initialize the Mobile Ads SDK after consent is resolved
+                    initializeMobileAdsSdk()
+                }
+            },
+            { requestError ->
+                // Consent request failed — initialize anyway so ads still load
+                Log.w("AdMob", "Consent request error: ${requestError.message}")
+                initializeMobileAdsSdk()
+            }
+        )
+
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val systemDark = isSystemInDarkTheme()
@@ -64,6 +99,14 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private fun initializeMobileAdsSdk() {
+        if (consentInformation.canRequestAds()) {
+            MobileAds.initialize(this) { initializationStatus ->
+                Log.d("AdMob", "SDK initialized: $initializationStatus")
             }
         }
     }
