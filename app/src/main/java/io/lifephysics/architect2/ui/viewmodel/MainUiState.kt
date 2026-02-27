@@ -9,6 +9,7 @@ data class MainUiState(
     val pendingTasks: List<TaskEntity> = emptyList(),
     val completedTasks: List<TaskEntity> = emptyList(),
     val isLoading: Boolean = true,
+    val level: Int = 1,
     val rankTitle: String = "Initializing...",
     val xpToNextLevel: Int = 1,
     val currentLevelProgress: Float = 0f,

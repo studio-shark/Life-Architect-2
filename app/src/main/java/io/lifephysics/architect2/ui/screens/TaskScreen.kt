@@ -2,8 +2,11 @@ package io.lifephysics.architect2.ui.screens
 
 import android.content.Intent
 import android.provider.CalendarContract
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -41,19 +44,24 @@ fun TasksScreen(viewModel: MainViewModel) {
             modifier = Modifier.padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 8.dp)
         )
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             items(uiState.pendingTasks, key = { it.id }) { task ->
                 TaskItem(
                     task = task,
                     onCompleted = { viewModel.onTaskCompleted(task) }
                 )
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
             }
 
             item {
+                Spacer(modifier = Modifier.height(4.dp))
                 AddTaskItem(
                     onAddTask = { title -> viewModel.onAddTask(title) },
                     onAddToCalendar = { title ->
@@ -64,6 +72,7 @@ fun TasksScreen(viewModel: MainViewModel) {
                         context.startActivity(intent)
                     }
                 )
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
