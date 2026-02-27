@@ -25,7 +25,7 @@ The application is in active development. The current feature set provides the c
 | **Offline-First Storage** | ✅ Complete | All data is stored locally using RoomDB for instant access. |
 | **Goal Management** | 🚧 Planned | Group tasks under larger goals or projects. |
 | **Analytics & Insights** | 🚧 Planned | Visualize progress with charts and historical data. |
-| **Avatar & Store** | 🚧 Planned | Customize your profile with unlockable avatars. |
+| **Avatar & Store** | ✅ Complete | Customize your profile with unlockable avatars. |
 | **Google Sign-In** | 🚧 Planned | Sync progress across devices with cloud backup. |
 
 ---
