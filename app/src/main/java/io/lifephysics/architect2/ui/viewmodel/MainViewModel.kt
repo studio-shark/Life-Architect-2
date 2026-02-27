@@ -114,7 +114,11 @@ class MainViewModel(
     // ---------------------------------------------------------------------------
 
     fun onTaskCompleted(task: TaskEntity) = viewModelScope.launch {
-        val user = _uiState.value.user ?: return@launch
+        // Always fetch the user directly from the database to avoid a null race condition
+        // on real devices where the Flow may not have emitted yet when the tap fires.
+        val user = repository.getUser().first()
+            ?: UserEntity(googleId = "local_user").also { repository.upsertUser(it) }
+
         val now = System.currentTimeMillis()
         val todayEpochDay = now / 86_400_000L
 
@@ -206,7 +210,6 @@ class MainViewModel(
             )
         }
 
-        // FIX: update both isCompleted AND status so the pending query filters it out
         repository.updateTask(
             task.copy(
                 isCompleted = true,
@@ -226,7 +229,9 @@ class MainViewModel(
     }
 
     fun onTaskReverted(task: TaskEntity) = viewModelScope.launch {
-        val user = _uiState.value.user ?: return@launch
+        val user = repository.getUser().first()
+            ?: UserEntity(googleId = "local_user").also { repository.upsertUser(it) }
+
         val difficulty = TaskDifficulty.valueOf(task.difficulty)
         val xpLost = difficulty.xpValue
         val updatedUser = user.copy(
@@ -234,7 +239,6 @@ class MainViewModel(
             totalXp = (user.totalXp - xpLost).coerceAtLeast(0)
         )
         repository.updateUser(updatedUser)
-        // FIX: restore both isCompleted and status
         repository.updateTask(
             task.copy(
                 isCompleted = false,
@@ -249,10 +253,11 @@ class MainViewModel(
 
     fun onAddTask(title: String, difficulty: TaskDifficulty = TaskDifficulty.MEDIUM) =
         viewModelScope.launch {
+            val userId = repository.getUser().first()?.googleId ?: "local_user"
             val newTask = TaskEntity(
                 title = title,
                 difficulty = difficulty.name,
-                userId = _uiState.value.user?.googleId ?: "local_user"
+                userId = userId
             )
             repository.insertTask(newTask)
         }
@@ -284,8 +289,6 @@ class MainViewModel(
     }
 
     // ---------------------------------------------------------------------------
-    // Pop-up State Handlers
-    // ---------------------------------------------------------------------------
 
     fun onDismissXpPopup() = _uiState.update { it.copy(xpPopupVisible = false) }
 
@@ -298,19 +301,12 @@ class MainViewModel(
     // Private Helpers
     // ---------------------------------------------------------------------------
 
-    /**
-     * Updates the daily streak:
-     * - Same day: no change.
-     * - Next consecutive day: streak increments; if crossing a new multiple of 7, reset weeklyStreakClaimed.
-     * - Gap of 2+ days: streak resets to 1, both claim flags reset.
-     */
     private fun updateStreak(user: UserEntity, todayEpochDay: Long): UserEntity {
         val lastDay = user.lastCompletionDay
         return when {
             lastDay == todayEpochDay     -> user
             lastDay == todayEpochDay - 1 -> {
                 val newStreak = user.dailyStreak + 1
-                // Reset weekly claim flag when entering a new 7-day cycle
                 val crossedWeekBoundary = (newStreak % 7 == 0)
                 user.copy(
                     dailyStreak = newStreak,
@@ -327,10 +323,6 @@ class MainViewModel(
         }
     }
 
-    /**
-     * Returns [WEEKLY_STREAK_XP] when the streak has just reached a multiple of 7
-     * and the payout has not yet been claimed this cycle.
-     */
     private fun checkWeeklyStreakPayout(user: UserEntity): Int {
         if (user.weeklyStreakClaimed) return 0
         if (user.dailyStreak > 0 && user.dailyStreak % 7 == 0) return WEEKLY_STREAK_XP

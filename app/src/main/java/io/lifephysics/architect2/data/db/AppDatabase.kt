@@ -118,6 +118,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "life_architect_database"
                 )
                     .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
+                    .fallbackToDestructiveMigration()
                     .addCallback(DISABLE_FOREIGN_KEYS)
                     .build()
                 INSTANCE = instance

@@ -1,5 +1,6 @@
 package io.lifephysics.architect2.ui.composables
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,15 +20,17 @@ import io.lifephysics.architect2.data.db.entity.TaskEntity
 
 /**
  * Displays a single pending task in a card that visually matches the TrendCard style.
- * Tapping the checkbox triggers [onCompleted], which moves the task to History and shows the XP pop-up.
+ * Tapping anywhere on the card (including the checkbox) triggers [onCompleted].
  *
  * @param task The task entity to display.
- * @param onCompleted Callback invoked when the checkbox is tapped.
+ * @param onCompleted Callback invoked when the card or checkbox is tapped.
  */
 @Composable
 fun TaskItem(task: TaskEntity, onCompleted: (TaskEntity) -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCompleted(task) },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
@@ -40,9 +43,9 @@ fun TaskItem(task: TaskEntity, onCompleted: (TaskEntity) -> Unit) {
         ) {
             Checkbox(
                 checked = false,
-                onCheckedChange = { onCompleted(task) },
+                onCheckedChange = null, // Handled by the card's clickable modifier
                 colors = CheckboxDefaults.colors(
-                    uncheckedColor = MaterialTheme.colorScheme.outline,
+                    uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     checkedColor = MaterialTheme.colorScheme.primary
                 )
             )
