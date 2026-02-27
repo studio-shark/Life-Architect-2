@@ -37,7 +37,7 @@ fun TasksScreen(viewModel: MainViewModel) {
 
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
-            text = "Quests",
+            text = "Tasks",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground,

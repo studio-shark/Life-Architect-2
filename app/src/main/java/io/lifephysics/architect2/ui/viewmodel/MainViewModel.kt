@@ -26,16 +26,13 @@ import kotlin.random.Random
 // XP System Constants
 // ---------------------------------------------------------------------------
 
-/** Full XP for the first N tasks per day. Research shows 7 is a generous but realistic daily target. */
+/** Full XP for the first N tasks per day. */
 private const val FULL_XP_THRESHOLD = 7
 
 /** Reduced XP tier for tasks 8–15 per day. */
 private const val HALF_XP_THRESHOLD = 15
 
-/** XP multiplier for the "extra" tier (tasks 8–15). */
 private const val HALF_XP_MULTIPLIER = 0.50f
-
-/** XP multiplier for the "grind" tier (tasks 16+). */
 private const val GRIND_XP_MULTIPLIER = 0.10f
 
 /** XP fraction kept when repeating the same task title within 24 hours. */
@@ -43,17 +40,13 @@ private const val REPETITION_PENALTY = 0.25f
 
 /** Streak bonus multiplier applied to the first few tasks of the day when streak >= 2. */
 private const val STREAK_BONUS_MULTIPLIER = 1.25f
-
-/** Number of tasks per day that receive the streak bonus. */
 private const val STREAK_BONUS_TASK_COUNT = 3
 
-/** XP awarded for completing the weekly goal. */
-private const val WEEKLY_GOAL_XP = 500
+/** XP awarded for completing a full 7-day streak cycle. */
+private const val WEEKLY_STREAK_XP = 500
 
 /** XP awarded for achieving a 30-day continuous streak. */
 private const val MONTHLY_MILESTONE_XP = 2500
-
-/** Minimum streak length to trigger the monthly milestone. */
 private const val MONTHLY_MILESTONE_STREAK = 30
 
 // ---------------------------------------------------------------------------
@@ -75,7 +68,6 @@ class MainViewModel(
     private val _trendsUiState = MutableStateFlow(TrendsUiState())
     val trendsUiState: StateFlow<TrendsUiState> = _trendsUiState
 
-    /** Tracks timestamps of recent completions for velocity damping. */
     private val recentCompletionTimestamps = ArrayDeque<Long>(10)
 
     init {
@@ -146,7 +138,7 @@ class MainViewModel(
             else                               -> (baseXp * GRIND_XP_MULTIPLIER).toInt()
         }
 
-        // 5. Repetition penalty — check completed tasks in the last 24 hours
+        // 5. Repetition penalty
         val recentCompleted = repository.getCompletedTasks().first()
         val recentTitles = recentCompleted
             .filter { it.completedAt != null && (now - it.completedAt) < 86_400_000L }
@@ -154,7 +146,7 @@ class MainViewModel(
         val isRepeat = task.title.trim().lowercase() in recentTitles
         val afterRepeatXp = if (isRepeat) (tieredXp * REPETITION_PENALTY).toInt() else tieredXp
 
-        // 6. Velocity damping for rapid batch completions
+        // 6. Velocity damping
         recentCompletionTimestamps.addLast(now)
         if (recentCompletionTimestamps.size > 5) recentCompletionTimestamps.removeFirst()
         val batchCount = recentCompletionTimestamps.count { (now - it) < 10_000L }
@@ -181,24 +173,23 @@ class MainViewModel(
             (afterStreakXp * multiplier).toInt()
         } else afterStreakXp
 
-        // 9. Increment counters and save task
+        // 9. Increment counters
         var finalUser = checkLevelUp(
             userWithStreak.copy(
                 xp = userWithStreak.xp + finalXp,
                 totalXp = userWithStreak.totalXp + finalXp,
-                tasksCompletedToday = userWithStreak.tasksCompletedToday + 1,
-                weeklyGoalProgress = userWithStreak.weeklyGoalProgress + 1
+                tasksCompletedToday = userWithStreak.tasksCompletedToday + 1
             )
         )
 
-        // 10. Weekly goal payout
-        val weeklyBonus = checkWeeklyGoal(finalUser)
+        // 10. Weekly streak payout — fires when streak reaches a new multiple of 7
+        val weeklyBonus = checkWeeklyStreakPayout(finalUser)
         if (weeklyBonus > 0) {
             finalUser = checkLevelUp(
                 finalUser.copy(
                     xp = finalUser.xp + weeklyBonus,
                     totalXp = finalUser.totalXp + weeklyBonus,
-                    weeklyGoalClaimed = true
+                    weeklyStreakClaimed = true
                 )
             )
         }
@@ -215,8 +206,15 @@ class MainViewModel(
             )
         }
 
+        // FIX: update both isCompleted AND status so the pending query filters it out
+        repository.updateTask(
+            task.copy(
+                isCompleted = true,
+                status = "completed",
+                completedAt = now
+            )
+        )
         repository.updateUser(finalUser)
-        repository.updateTask(task.copy(isCompleted = true, completedAt = now))
 
         val totalBonus = weeklyBonus + monthlyBonus
         showXpPopup(
@@ -236,7 +234,14 @@ class MainViewModel(
             totalXp = (user.totalXp - xpLost).coerceAtLeast(0)
         )
         repository.updateUser(updatedUser)
-        repository.updateTask(task.copy(isCompleted = false, completedAt = null))
+        // FIX: restore both isCompleted and status
+        repository.updateTask(
+            task.copy(
+                isCompleted = false,
+                status = "pending",
+                completedAt = null
+            )
+        )
         showXpPopup(amount = -xpLost, isCritical = false)
         delay(1800)
         onDismissXpPopup()
@@ -254,20 +259,6 @@ class MainViewModel(
 
     fun onThemeChange(theme: Theme) = viewModelScope.launch {
         repository.updateUserTheme(theme)
-    }
-
-    /** Sets or updates the user's weekly task completion goal. */
-    fun onSetWeeklyGoal(target: Int) = viewModelScope.launch {
-        val user = _uiState.value.user ?: return@launch
-        val currentWeek = getCurrentIsoWeek()
-        repository.updateUser(
-            user.copy(
-                weeklyGoalTarget = target,
-                weeklyGoalProgress = if (user.weeklyGoalWeek == currentWeek) user.weeklyGoalProgress else 0,
-                weeklyGoalWeek = currentWeek,
-                weeklyGoalClaimed = if (user.weeklyGoalWeek == currentWeek) user.weeklyGoalClaimed else false
-            )
-        )
     }
 
     // ---------------------------------------------------------------------------
@@ -310,40 +301,42 @@ class MainViewModel(
     /**
      * Updates the daily streak:
      * - Same day: no change.
-     * - Next consecutive day: streak increments.
-     * - Gap of 2+ days: streak resets to 1 and monthly milestone flag resets.
+     * - Next consecutive day: streak increments; if crossing a new multiple of 7, reset weeklyStreakClaimed.
+     * - Gap of 2+ days: streak resets to 1, both claim flags reset.
      */
     private fun updateStreak(user: UserEntity, todayEpochDay: Long): UserEntity {
         val lastDay = user.lastCompletionDay
         return when {
             lastDay == todayEpochDay     -> user
-            lastDay == todayEpochDay - 1 -> user.copy(
-                dailyStreak = user.dailyStreak + 1,
-                lastCompletionDay = todayEpochDay
-            )
+            lastDay == todayEpochDay - 1 -> {
+                val newStreak = user.dailyStreak + 1
+                // Reset weekly claim flag when entering a new 7-day cycle
+                val crossedWeekBoundary = (newStreak % 7 == 0)
+                user.copy(
+                    dailyStreak = newStreak,
+                    lastCompletionDay = todayEpochDay,
+                    weeklyStreakClaimed = if (crossedWeekBoundary) false else user.weeklyStreakClaimed
+                )
+            }
             else -> user.copy(
                 dailyStreak = 1,
                 lastCompletionDay = todayEpochDay,
+                weeklyStreakClaimed = false,
                 monthlyMilestoneClaimed = false
             )
         }
     }
 
     /**
-     * Returns [WEEKLY_GOAL_XP] if the user has met their weekly goal this week and
-     * has not yet claimed the payout, otherwise 0.
+     * Returns [WEEKLY_STREAK_XP] when the streak has just reached a multiple of 7
+     * and the payout has not yet been claimed this cycle.
      */
-    private fun checkWeeklyGoal(user: UserEntity): Int {
-        if (user.weeklyGoalTarget <= 0) return 0
-        if (user.weeklyGoalWeek != getCurrentIsoWeek()) return 0
-        if (user.weeklyGoalClaimed) return 0
-        return if (user.weeklyGoalProgress >= user.weeklyGoalTarget) WEEKLY_GOAL_XP else 0
+    private fun checkWeeklyStreakPayout(user: UserEntity): Int {
+        if (user.weeklyStreakClaimed) return 0
+        if (user.dailyStreak > 0 && user.dailyStreak % 7 == 0) return WEEKLY_STREAK_XP
+        return 0
     }
 
-    /**
-     * Returns [MONTHLY_MILESTONE_XP] if the user has a 30-day streak and has not yet
-     * claimed the milestone this streak cycle, otherwise 0.
-     */
     private fun checkMonthlyMilestone(user: UserEntity): Int {
         if (user.monthlyMilestoneClaimed) return 0
         return if (user.dailyStreak >= MONTHLY_MILESTONE_STREAK) MONTHLY_MILESTONE_XP else 0
@@ -367,14 +360,6 @@ class MainViewModel(
         level < 10 -> "Momentum Builder"
         level < 20 -> "Pattern Mapper"
         else       -> "System Architect"
-    }
-
-    private fun getCurrentIsoWeek(): Int {
-        val cal = java.util.Calendar.getInstance().apply {
-            minimalDaysInFirstWeek = 4
-            firstDayOfWeek = java.util.Calendar.MONDAY
-        }
-        return cal.get(java.util.Calendar.WEEK_OF_YEAR)
     }
 }
 

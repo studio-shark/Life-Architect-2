@@ -22,6 +22,7 @@ import io.lifephysics.architect2.data.db.entity.UserEntity
  *   4 — Replaced OwnedAvatarEntity with OwnedPartEntity; replaced equippedAvatarId with avatarConfig string
  *   5 — Removed OwnedPartEntity and coins column (shop system decommissioned)
  *   6 — Added streak and weekly goal columns to users table
+ *   7 — Replaced weekly goal columns with weekly_streak_claimed; added monthly_milestone_claimed
  */
 @Database(
     entities = [
@@ -29,7 +30,7 @@ import io.lifephysics.architect2.data.db.entity.UserEntity
         GoalEntity::class,
         TaskEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -50,7 +51,7 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        /** Migration from v5 to v6: adds streak and weekly goal columns to the users table. */
+        /** Migration v5 → v6: adds streak and weekly goal columns. */
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE users ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0")
@@ -65,6 +66,50 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration v6 → v7: replaces weekly goal columns with weekly_streak_claimed. */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add the new simplified column
+                database.execSQL("ALTER TABLE users ADD COLUMN weekly_streak_claimed INTEGER NOT NULL DEFAULT 0")
+                // Drop the old weekly goal columns (SQLite requires recreating the table)
+                database.execSQL("""
+                    CREATE TABLE users_new (
+                        google_id TEXT NOT NULL PRIMARY KEY,
+                        email TEXT NOT NULL DEFAULT '',
+                        name TEXT NOT NULL DEFAULT 'Adventurer',
+                        picture_url TEXT,
+                        level INTEGER NOT NULL DEFAULT 1,
+                        xp INTEGER NOT NULL DEFAULT 0,
+                        total_xp INTEGER NOT NULL DEFAULT 0,
+                        avatar_config TEXT,
+                        theme_preference TEXT NOT NULL DEFAULT 'SYSTEM',
+                        daily_streak INTEGER NOT NULL DEFAULT 0,
+                        last_completion_day INTEGER NOT NULL DEFAULT 0,
+                        tasks_completed_today INTEGER NOT NULL DEFAULT 0,
+                        today_reset_day INTEGER NOT NULL DEFAULT 0,
+                        weekly_streak_claimed INTEGER NOT NULL DEFAULT 0,
+                        monthly_milestone_claimed INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+                database.execSQL("""
+                    INSERT INTO users_new (
+                        google_id, email, name, picture_url, level, xp, total_xp,
+                        avatar_config, theme_preference, daily_streak, last_completion_day,
+                        tasks_completed_today, today_reset_day, weekly_streak_claimed,
+                        monthly_milestone_claimed
+                    )
+                    SELECT
+                        google_id, email, name, picture_url, level, xp, total_xp,
+                        avatar_config, theme_preference, daily_streak, last_completion_day,
+                        tasks_completed_today, today_reset_day, 0,
+                        monthly_milestone_claimed
+                    FROM users
+                """.trimIndent())
+                database.execSQL("DROP TABLE users")
+                database.execSQL("ALTER TABLE users_new RENAME TO users")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -72,7 +117,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "life_architect_database"
                 )
-                    .addMigrations(MIGRATION_5_6)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
                     .addCallback(DISABLE_FOREIGN_KEYS)
                     .build()
                 INSTANCE = instance
