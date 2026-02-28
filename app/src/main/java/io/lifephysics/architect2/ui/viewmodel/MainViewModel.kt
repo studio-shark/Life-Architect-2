@@ -1,7 +1,9 @@
 package io.lifephysics.architect2.ui.viewmodel
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.provider.CalendarContract
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.lifephysics.architect2.data.AppRepository
@@ -11,6 +13,8 @@ import io.lifephysics.architect2.data.db.entity.TaskEntity
 import io.lifephysics.architect2.data.db.entity.UserEntity
 import io.lifephysics.architect2.domain.TaskDifficulty
 import io.lifephysics.architect2.domain.TrendItem
+import io.lifephysics.architect2.ui.viewmodel.MainUiState
+import io.lifephysics.architect2.ui.viewmodel.TrendsUiState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +22,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.math.floor
+import java.time.LocalDateTime
+import java.time.ZoneId
 import kotlin.math.pow
 import kotlin.random.Random
 
@@ -50,23 +55,51 @@ private const val MONTHLY_MILESTONE_XP = 2500
 private const val MONTHLY_MILESTONE_STREAK = 30
 
 // ---------------------------------------------------------------------------
+// UI State
+// ---------------------------------------------------------------------------
+
+
+
+// ---------------------------------------------------------------------------
 // ViewModel
 // ---------------------------------------------------------------------------
+
+/**
+ * The primary ViewModel for the Life Architect app.
+ *
+ * Manages task completion, XP calculation, streak tracking, theme preferences,
+ * and the Trending feed. The anti-gaming XP system applies diminishing returns,
+ * repetition penalties, velocity damping, streak bonuses, weekly payouts, and
+ * monthly milestones.
+ *
+ * Task completion is always safe to call on any device because it fetches the
+ * user record directly from the database rather than relying on the UI state flow.
+ *
+ * @param repository The [AppRepository] for all database operations.
+ * @param trendsRepository The [TrendsRepository] for fetching Google Trends data.
+ * @param appContext The application [Context], used for launching calendar intents.
+ */
+data class TrendsUiState(
+    val trends: List<TrendItem> = emptyList(),
+    val isLoading: Boolean = false,
+    val error: String? = null,
+    val selectedCountry: String? = null
+)
 
 class MainViewModel(
     val repository: AppRepository,
     private val trendsRepository: TrendsRepository,
-    appContext: Context
+    private val appContext: Context
 ) : ViewModel() {
-
-    private val prefs: SharedPreferences =
-        appContext.getSharedPreferences("life_architect_prefs", Context.MODE_PRIVATE)
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState
 
     private val _trendsUiState = MutableStateFlow(TrendsUiState())
     val trendsUiState: StateFlow<TrendsUiState> = _trendsUiState
+
+    private val prefs: SharedPreferences =
+        appContext.getSharedPreferences("life_architect_prefs", Context.MODE_PRIVATE)
 
     private val recentCompletionTimestamps = ArrayDeque<Long>(10)
 
@@ -113,10 +146,16 @@ class MainViewModel(
     // Task Actions
     // ---------------------------------------------------------------------------
 
+    /**
+     * Marks a task as completed and awards XP to the user.
+     *
+     * Uses [AppRepository.getUserOnce] — a direct suspend read — to guarantee the
+     * user row is fetched before any subsequent database write. This avoids the
+     * race condition where [kotlinx.coroutines.flow.Flow.first] may return null on
+     * a cold Flow before Room has emitted the first value.
+     */
     fun onTaskCompleted(task: TaskEntity) = viewModelScope.launch {
-        // Always fetch the user directly from the database to avoid a null race condition
-        // on real devices where the Flow may not have emitted yet when the tap fires.
-        val user = repository.getUser().first()
+        val user = repository.getUserOnce()
             ?: UserEntity(googleId = "local_user").also { repository.upsertUser(it) }
 
         val now = System.currentTimeMillis()
@@ -137,9 +176,9 @@ class MainViewModel(
         // 4. Diminishing returns tier
         val completedToday = userWithStreak.tasksCompletedToday
         val tieredXp = when {
-            completedToday < FULL_XP_THRESHOLD -> baseXp
-            completedToday < HALF_XP_THRESHOLD -> (baseXp * HALF_XP_MULTIPLIER).toInt()
-            else                               -> (baseXp * GRIND_XP_MULTIPLIER).toInt()
+            completedToday < FULL_XP_THRESHOLD  -> baseXp
+            completedToday < HALF_XP_THRESHOLD  -> (baseXp * HALF_XP_MULTIPLIER).toInt()
+            else                                -> (baseXp * GRIND_XP_MULTIPLIER).toInt()
         }
 
         // 5. Repetition penalty
@@ -186,7 +225,7 @@ class MainViewModel(
             )
         )
 
-        // 10. Weekly streak payout — fires when streak reaches a new multiple of 7
+        // 10. Weekly streak payout
         val weeklyBonus = checkWeeklyStreakPayout(finalUser)
         if (weeklyBonus > 0) {
             finalUser = checkLevelUp(
@@ -228,8 +267,11 @@ class MainViewModel(
         onDismissXpPopup()
     }
 
+    /**
+     * Reverts a completed task back to pending and deducts the base XP.
+     */
     fun onTaskReverted(task: TaskEntity) = viewModelScope.launch {
-        val user = repository.getUser().first()
+        val user = repository.getUserOnce()
             ?: UserEntity(googleId = "local_user").also { repository.upsertUser(it) }
 
         val difficulty = TaskDifficulty.valueOf(task.difficulty)
@@ -251,16 +293,47 @@ class MainViewModel(
         onDismissXpPopup()
     }
 
-    fun onAddTask(title: String, difficulty: TaskDifficulty = TaskDifficulty.MEDIUM) =
+    /**
+     * Creates and inserts a new task for the local user.
+     *
+     * Uses [AppRepository.getUserOnce] — a direct suspend read — to guarantee the
+     * user row exists in the database before the task insert fires. This prevents
+     * the FOREIGN KEY constraint failure that occurs when [Flow.first] returns null
+     * on a cold Flow before Room has emitted the first value.
+     *
+     * @param title The task title, which may contain a date expression.
+     * @param difficulty The difficulty string matching a [TaskDifficulty] enum name.
+     * @param dueDate The optional due date parsed from the task title or selected via the date picker.
+     */
+    fun onAddTask(title: String, difficulty: String, dueDate: LocalDateTime? = null) =
         viewModelScope.launch {
-            val userId = repository.getUser().first()?.googleId ?: "local_user"
+            val user = repository.getUserOnce()
+                ?: UserEntity(googleId = "local_user").also { repository.upsertUser(it) }
+            val dueDateMillis = dueDate
+                ?.atZone(ZoneId.systemDefault())
+                ?.toInstant()
+                ?.toEpochMilli()
             val newTask = TaskEntity(
                 title = title,
-                difficulty = difficulty.name,
-                userId = userId
+                difficulty = difficulty,
+                userId = user.googleId,
+                dueDate = dueDateMillis
             )
             repository.insertTask(newTask)
         }
+
+    /**
+     * Opens the system's default calendar application at the task's due date.
+     */
+    fun onCalendarClick(task: TaskEntity) {
+        val dueDate = task.dueDate ?: return
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            data = CalendarContract.CONTENT_URI
+            putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, dueDate)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        appContext.startActivity(intent)
+    }
 
     fun onThemeChange(theme: Theme) = viewModelScope.launch {
         repository.updateUserTheme(theme)
@@ -282,38 +355,46 @@ class MainViewModel(
                 )
             }
         } else {
-            _trendsUiState.update {
-                it.copy(isLoading = false, trends = result, selectedCountry = countryCode, error = null)
-            }
+            _trendsUiState.update { it.copy(isLoading = false, trends = result) }
         }
     }
 
+    fun onCountrySelected(countryCode: String?) {
+        _trendsUiState.update { it.copy(selectedCountry = countryCode) }
+        loadTrends(countryCode)
+    }
+
+    // ---------------------------------------------------------------------------
+    // XP Popup
     // ---------------------------------------------------------------------------
 
-    fun onDismissXpPopup() = _uiState.update { it.copy(xpPopupVisible = false) }
-
-    private fun showXpPopup(amount: Int, isCritical: Boolean) =
+    private fun showXpPopup(amount: Int, isCritical: Boolean) {
         _uiState.update {
-            it.copy(xpPopupVisible = true, xpPopupAmount = amount, xpPopupIsCritical = isCritical)
+            it.copy(
+                xpPopupVisible = true,
+                xpPopupAmount = amount,
+                xpPopupIsCritical = isCritical
+            )
         }
+    }
+
+    fun onDismissXpPopup() {
+        _uiState.update { it.copy(xpPopupVisible = false) }
+    }
 
     // ---------------------------------------------------------------------------
-    // Private Helpers
+    // Private XP Helpers
     // ---------------------------------------------------------------------------
 
     private fun updateStreak(user: UserEntity, todayEpochDay: Long): UserEntity {
-        val lastDay = user.lastCompletionDay
-        return when {
-            lastDay == todayEpochDay     -> user
-            lastDay == todayEpochDay - 1 -> {
-                val newStreak = user.dailyStreak + 1
-                val crossedWeekBoundary = (newStreak % 7 == 0)
-                user.copy(
-                    dailyStreak = newStreak,
-                    lastCompletionDay = todayEpochDay,
-                    weeklyStreakClaimed = if (crossedWeekBoundary) false else user.weeklyStreakClaimed
-                )
-            }
+        val yesterday = todayEpochDay - 1
+        return when (user.lastCompletionDay) {
+            todayEpochDay -> user // Already updated today
+            yesterday -> user.copy(
+                dailyStreak = user.dailyStreak + 1,
+                lastCompletionDay = todayEpochDay,
+                weeklyStreakClaimed = if (user.dailyStreak + 1 < 7) false else user.weeklyStreakClaimed
+            )
             else -> user.copy(
                 dailyStreak = 1,
                 lastCompletionDay = todayEpochDay,
@@ -324,44 +405,45 @@ class MainViewModel(
     }
 
     private fun checkWeeklyStreakPayout(user: UserEntity): Int {
-        if (user.weeklyStreakClaimed) return 0
-        if (user.dailyStreak > 0 && user.dailyStreak % 7 == 0) return WEEKLY_STREAK_XP
-        return 0
+        val isNewWeekMultiple = user.dailyStreak > 0 && user.dailyStreak % 7 == 0
+        return if (isNewWeekMultiple && !user.weeklyStreakClaimed) WEEKLY_STREAK_XP else 0
     }
 
     private fun checkMonthlyMilestone(user: UserEntity): Int {
-        if (user.monthlyMilestoneClaimed) return 0
-        return if (user.dailyStreak >= MONTHLY_MILESTONE_STREAK) MONTHLY_MILESTONE_XP else 0
+        return if (user.dailyStreak >= MONTHLY_MILESTONE_STREAK && !user.monthlyMilestoneClaimed) {
+            MONTHLY_MILESTONE_XP
+        } else 0
     }
 
     private fun checkLevelUp(user: UserEntity): UserEntity {
         var current = user
         while (current.xp >= getXpNeededForLevel(current.level)) {
-            current = current.copy(level = current.level + 1)
+            current = current.copy(
+                xp = current.xp - getXpNeededForLevel(current.level),
+                level = current.level + 1
+            )
         }
         return current
     }
 
+    // ---------------------------------------------------------------------------
+    // Rank & Level Helpers
+    // ---------------------------------------------------------------------------
+
     private fun getXpNeededForLevel(level: Int): Int {
         if (level <= 0) return 0
-        return floor(500 * level.toDouble().pow(1.2)).toInt()
+        return (100 * level.toDouble().pow(1.5)).toInt()
     }
 
-    private fun getRankTitle(level: Int): String = when {
-        level < 5  -> "Fragment Seeker"
-        level < 10 -> "Momentum Builder"
-        level < 20 -> "Pattern Mapper"
-        else       -> "System Architect"
+    private fun getRankTitle(level: Int): String = when (level) {
+        in 1..4   -> "Novice"
+        in 5..9   -> "Apprentice"
+        in 10..14 -> "Journeyman"
+        in 15..19 -> "Adept"
+        in 20..24 -> "Expert"
+        in 25..29 -> "Master"
+        in 30..39 -> "Grandmaster"
+        in 40..49 -> "Legend"
+        else      -> "Mythic"
     }
 }
-
-// ---------------------------------------------------------------------------
-// UI State
-// ---------------------------------------------------------------------------
-
-data class TrendsUiState(
-    val trends: List<TrendItem> = emptyList(),
-    val isLoading: Boolean = false,
-    val error: String? = null,
-    val selectedCountry: String? = null
-)

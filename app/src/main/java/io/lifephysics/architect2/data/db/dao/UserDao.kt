@@ -30,21 +30,25 @@ interface UserDao {
     fun observeUser(googleId: String): Flow<UserEntity?>
 
     /**
-     * Observes the offline-first local user.
-     * This is a convenience method used by [MainViewModel] before Google Sign-In is wired up.
-     * It queries for the singleton user whose [UserEntity.googleId] is "local_user".
-     *
-     * @return A [Flow] that emits the local [UserEntity] whenever it changes.
+     * Observes the offline-first local user as a Flow (for UI state).
      */
     @Query("SELECT * FROM users WHERE google_id = 'local_user' LIMIT 1")
     fun getLocalUser(): Flow<UserEntity?>
 
     /**
-     * Updates the theme preference for the local offline-first user.
-     * Accepts a string value matching the [io.lifephysics.architect2.data.Theme] enum name
-     * ("LIGHT", "DARK", or "SYSTEM").
+     * Returns the local user as a direct suspend read (not a Flow).
      *
-     * @param theme The name of the theme to persist.
+     * Use this for one-shot reads inside coroutines where you need the result
+     * immediately and cannot afford the indirection of a Flow emission. This
+     * guarantees the query completes before the calling coroutine continues,
+     * which is required when the result is used as a foreign key in a subsequent
+     * insert.
+     */
+    @Query("SELECT * FROM users WHERE google_id = 'local_user' LIMIT 1")
+    suspend fun getLocalUserOnce(): UserEntity?
+
+    /**
+     * Updates the theme preference for the local offline-first user.
      */
     @Query("UPDATE users SET theme_preference = :theme WHERE google_id = 'local_user'")
     suspend fun updateUserTheme(theme: String)

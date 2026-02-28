@@ -62,6 +62,9 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.androidx.material.icons.extended)
 
+    // Charting Library (Maven Central) — 0.0.19 is the last version compiled with Kotlin 2.0.x
+    implementation("io.github.ehsannarmani:compose-charts:0.0.19")
+
     // Room Database
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

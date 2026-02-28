@@ -2,16 +2,16 @@ package io.lifephysics.architect2.data.db.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
-import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
 import java.util.UUID
 
 /**
  * Represents a single task or "quest" in the database.
  *
- * Tasks belong to a goal and a user. The [isCompleted] boolean is a
- * computed convenience field kept in sync with [status] so the UI layer
- * can use a simple boolean check without parsing strings.
+ * Foreign key constraints have been intentionally removed. The app uses a single
+ * offline-first local user ("local_user") and the constraints provided no safety
+ * benefit while causing FOREIGN KEY constraint crashes when the user row had not
+ * yet been written at the time of the first task insert.
  *
  * @property id The unique identifier for the task.
  * @property goalId The ID of the goal this task belongs to.
@@ -25,24 +25,9 @@ import java.util.UUID
  * @property prerequisites A list of sub-tasks that must be completed before this task.
  * @property createdAt The timestamp when the task was created.
  * @property completedAt The timestamp when the task was completed.
+ * @property dueDate The timestamp for the task's deadline.
  */
-@Entity(
-    tableName = "tasks",
-    foreignKeys = [
-        ForeignKey(
-            entity = GoalEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["goal_id"],
-            onDelete = ForeignKey.CASCADE
-        ),
-        ForeignKey(
-            entity = UserEntity::class,
-            parentColumns = ["google_id"],
-            childColumns = ["user_id"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ]
-)
+@Entity(tableName = "tasks")
 data class TaskEntity(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
@@ -62,7 +47,7 @@ data class TaskEntity(
     val status: String = "pending",
 
     @ColumnInfo(name = "is_completed")
-    val isCompleted: Boolean = false, // Kept in sync with status by the ViewModel
+    val isCompleted: Boolean = false,
 
     val difficulty: String,
 
@@ -72,7 +57,10 @@ data class TaskEntity(
     val createdAt: Long = System.currentTimeMillis(),
 
     @ColumnInfo(name = "completed_at")
-    val completedAt: Long? = null
+    val completedAt: Long? = null,
+
+    @ColumnInfo(name = "due_date")
+    val dueDate: Long? = null
 )
 
 /**

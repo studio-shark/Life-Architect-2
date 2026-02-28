@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -25,8 +26,19 @@ import io.lifephysics.architect2.ui.screens.HistoryScreen
 import io.lifephysics.architect2.ui.screens.TasksScreen
 import io.lifephysics.architect2.ui.screens.TrendingScreen
 import io.lifephysics.architect2.ui.screens.UserScreen
+import io.lifephysics.architect2.ui.viewmodel.AnalyticsViewModelFactory
+import io.lifephysics.architect2.ui.viewmodel.AnalyticsViewModel
 import io.lifephysics.architect2.ui.viewmodel.MainViewModel
 
+/**
+ * The root composable for the entire app UI.
+ *
+ * Sets up the bottom navigation bar and the [NavHost] that hosts all screens.
+ * The [AnalyticsViewModel] is created here using [AnalyticsViewModelFactory] so it
+ * shares the same [AppRepository] instance as the rest of the app.
+ *
+ * @param viewModel The [MainViewModel] shared across all screens.
+ */
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
     val navController = rememberNavController()
@@ -39,6 +51,11 @@ fun MainScreen(viewModel: MainViewModel) {
     )
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // Create the AnalyticsViewModel here so it shares the same repository instance
+    val analyticsViewModel: AnalyticsViewModel = viewModel(
+        factory = AnalyticsViewModelFactory(viewModel.repository)
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -88,7 +105,9 @@ fun MainScreen(viewModel: MainViewModel) {
                     val trendsState by viewModel.trendsUiState.collectAsStateWithLifecycle()
                     TrendingScreen(trendsUiState = trendsState)
                 }
-                composable(Screen.Analytics.route) { AnalyticsScreen() }
+                composable(Screen.Analytics.route) {
+                    AnalyticsScreen(viewModel = analyticsViewModel)
+                }
             }
         }
 

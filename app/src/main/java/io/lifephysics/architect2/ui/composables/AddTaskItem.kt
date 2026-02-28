@@ -1,119 +1,207 @@
 package io.lifephysics.architect2.ui.composables
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import io.lifephysics.architect2.ui.theme.Green
-import io.lifephysics.architect2.ui.theme.Purple
+import io.lifephysics.architect2.utils.DateIntentParser
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.debounce
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
- * The inline row for adding a new task.
- * Matches the reference image: a text field on the left, a green "+" button
- * and a purple calendar button on the right.
+ * The inline add-task row shown at the bottom of the Tasks screen.
  *
- * @param onAddTask Callback invoked with the task title when the "+" button is tapped.
- * @param onAddToCalendar Callback invoked with the task title when the calendar button is tapped.
+ * Behaviour:
+ * - The text field shows "Add a new quest..." as a placeholder.
+ * - The '+' button is greyed out when the field is empty and turns green (primary colour)
+ *   as soon as the user starts typing.
+ * - When [DateIntentParser] detects a date or time pattern in the text (debounced 300ms),
+ *   a calendar icon slides in to the left of the '+' button. Tapping it opens a
+ *   [DatePickerDialog] with the parser's best guess pre-filled.
+ * - If the parser result is confident the icon is fully opaque; if it is a weak
+ *   (time-only) match the icon is dimmed to 40% alpha.
+ * - Pressing the IME action or tapping '+' submits the task and resets the row.
+ *
+ * @param onAddTask Called with the task title, difficulty string ("MEDIUM" default),
+ *   and optional due date when the user confirms.
  */
+@OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 fun AddTaskItem(
-    onAddTask: (String) -> Unit,
-    onAddToCalendar: (String) -> Unit
+    onAddTask: (title: String, difficulty: String, dueDate: LocalDateTime?) -> Unit
 ) {
-    var text by remember { mutableStateOf("") }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    var title by remember { mutableStateOf("") }
+    var parseResult by remember { mutableStateOf<DateIntentParser.ParseResult?>(null) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var confirmedDueDate by remember { mutableStateOf<LocalDateTime?>(null) }
+
+    val titleFlow = remember { MutableStateFlow("") }
+
+    // Debounce the title input and run the date parser on each change
+    LaunchedEffect(Unit) {
+        titleFlow
+            .debounce(300)
+            .collect { text ->
+                parseResult = if (text.isNotBlank()) DateIntentParser.parse(text) else null
+            }
+    }
+
+    val hasText = title.isNotBlank()
+    val showCalendar = hasText && (confirmedDueDate != null || parseResult?.bestGuess != null)
+
+    fun submit() {
+        if (!hasText) return
+        val dueDate = confirmedDueDate ?: parseResult?.bestGuess
+        onAddTask(title.trim(), "MEDIUM", dueDate)
+        title = ""
+        titleFlow.value = ""
+        parseResult = null
+        confirmedDueDate = null
+        keyboardController?.hide()
+    }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Text input field with placeholder
-        Box(
+        OutlinedTextField(
+            value = title,
+            onValueChange = {
+                title = it
+                titleFlow.value = it
+                confirmedDueDate = null
+            },
+            placeholder = { Text("Add a new quest...") },
+            singleLine = true,
             modifier = Modifier.weight(1f),
-            contentAlignment = Alignment.CenterStart
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { submit() })
+        )
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Calendar icon — slides in from the right when date-intent is detected
+        AnimatedVisibility(
+            visible = showCalendar,
+            enter = fadeIn() + slideInHorizontally(initialOffsetX = { it }),
+            exit = fadeOut() + slideOutHorizontally(targetOffsetX = { it })
         ) {
-            BasicTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                decorationBox = { innerTextField ->
-                    Box(modifier = Modifier.padding(start = 24.dp)) {
-                        if (text.isEmpty()) {
-                            Text(
-                                text = "Add a new quest...",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        innerTextField()
-                    }
-                }
-            )
+            val isConfident = confirmedDueDate != null || parseResult?.isConfident == true
+            FilledIconButton(
+                onClick = { showDatePicker = true },
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = androidx.compose.ui.graphics.Color(0xFF7C4DFF).copy(
+                        alpha = if (isConfident) 1f else 0.4f
+                    ),
+                    contentColor = androidx.compose.ui.graphics.Color.White
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CalendarToday,
+                    contentDescription = "Set Due Date",
+                    tint = MaterialTheme.colorScheme.onSecondary
+                )
+            }
         }
 
-        // Green "+" button
-        IconButton(
-            onClick = {
-                if (text.isNotBlank()) {
-                    onAddTask(text)
-                    text = ""
-                }
-            },
+        if (showCalendar) {
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+
+        // '+' button — greyed out when empty, primary colour when there is text
+        FilledIconButton(
+            onClick = { submit() },
             modifier = Modifier.size(48.dp),
-            colors = IconButtonDefaults.iconButtonColors(containerColor = Green),
-            shape = RoundedCornerShape(12.dp)
+            shape = CircleShape,
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = if (hasText) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                contentColor = if (hasText) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            ),
+            enabled = hasText
         ) {
             Icon(
                 imageVector = Icons.Default.Add,
-                contentDescription = "Add Task",
-                tint = Color.White
+                contentDescription = "Add Task"
             )
         }
+    }
 
-        // Purple calendar button
-        IconButton(
-            onClick = {
-                if (text.isNotBlank()) {
-                    onAddToCalendar(text)
+    // Date Picker Dialog
+    if (showDatePicker) {
+        val initialMillis = (confirmedDueDate ?: parseResult?.bestGuess)
+            ?.atZone(ZoneId.systemDefault())
+            ?.toInstant()
+            ?.toEpochMilli()
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        confirmedDueDate = Instant.ofEpochMilli(millis)
+                            .atZone(ZoneId.systemDefault())
+                            .toLocalDateTime()
+                    }
+                    showDatePicker = false
+                }) {
+                    Text("Confirm")
                 }
             },
-            modifier = Modifier.size(48.dp),
-            colors = IconButtonDefaults.iconButtonColors(containerColor = Purple),
-            shape = RoundedCornerShape(12.dp)
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
         ) {
-            Icon(
-                imageVector = Icons.Default.CalendarMonth,
-                contentDescription = "Add to Calendar",
-                tint = Color.White
-            )
+            DatePicker(state = datePickerState)
         }
     }
 }

@@ -17,7 +17,16 @@ class AppRepository(
     // --- User ---
 
     fun observeUser(googleId: String): Flow<UserEntity?> = userDao.observeUser(googleId)
+
+    /** Flow-based user observation — use for UI state only. */
     fun getUser(): Flow<UserEntity?> = userDao.getLocalUser()
+
+    /**
+     * Direct suspend read of the local user — use inside coroutines where the
+     * result is needed immediately (e.g. before a foreign-key insert).
+     */
+    suspend fun getUserOnce(): UserEntity? = userDao.getLocalUserOnce()
+
     suspend fun upsertUser(user: UserEntity) = userDao.upsertUser(user)
     suspend fun updateUser(user: UserEntity) = upsertUser(user)
     suspend fun updateUserTheme(theme: Theme) = userDao.updateUserTheme(theme.name)
