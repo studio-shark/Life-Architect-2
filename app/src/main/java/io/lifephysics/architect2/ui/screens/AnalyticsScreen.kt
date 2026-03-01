@@ -7,48 +7,64 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.SolidColor
-import ir.ehsannarmani.compose_charts.ColumnChart
-import ir.ehsannarmani.compose_charts.models.Bars
 import io.lifephysics.architect2.ui.viewmodel.AnalyticsViewModel
+import io.lifephysics.architect2.ui.viewmodel.DayStatus
+import ir.ehsannarmani.compose_charts.ColumnChart
+import ir.ehsannarmani.compose_charts.models.BarProperties
+import ir.ehsannarmani.compose_charts.models.Bars
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.util.Locale
 
 /**
  * The main Analytics screen composable.
  *
  * Displays a summary of the user's productivity data including total tasks,
- * current streak, total XP, a 14-day bar chart, a 90-day streak heatmap,
- * due date performance, and personal best records.
+ * total XP, a 14-day bar chart, a swipeable monthly calendar with green/red
+ * task dots, due date performance, and personal best records.
  *
  * @param viewModel The [AnalyticsViewModel] that provides the data for this screen.
  */
 @Composable
 fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
     val uiState by viewModel.uiState.collectAsState()
-
     Scaffold { innerPadding ->
         if (uiState.isLoading) {
             Box(
@@ -70,12 +86,11 @@ fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
                 item {
                     StatRow(
                         totalTasks = uiState.totalTasksCompleted,
-                        streak = uiState.currentStreak,
                         totalXp = uiState.totalXp
                     )
                 }
                 item { CompletionChart(data = uiState.dailyCompletions) }
-                item { StreakHeatmap(data = uiState.streakHeatmapData) }
+                item { MonthlyTaskCalendar(monthlyTaskStatus = uiState.monthlyTaskStatus) }
                 item {
                     CalendarAnalytics(
                         onTime = uiState.onTimeCompletions,
@@ -96,15 +111,13 @@ fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
 // ---------------------------------------------------------------------------
 // Stat Row
 // ---------------------------------------------------------------------------
-
 @Composable
-private fun StatRow(totalTasks: Int, streak: Int, totalXp: Int) {
+private fun StatRow(totalTasks: Int, totalXp: Int) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         StatCard(title = "Tasks Done", value = totalTasks.toString(), modifier = Modifier.weight(1f))
-        StatCard(title = "Streak", value = "$streak days", modifier = Modifier.weight(1f))
         StatCard(title = "Total XP", value = totalXp.toString(), modifier = Modifier.weight(1f))
     }
 }
@@ -138,7 +151,6 @@ private fun StatCard(title: String, value: String, modifier: Modifier = Modifier
 // ---------------------------------------------------------------------------
 // Completion Chart
 // ---------------------------------------------------------------------------
-
 @Composable
 private fun CompletionChart(data: Map<LocalDate, Int>) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -148,15 +160,15 @@ private fun CompletionChart(data: Map<LocalDate, Int>) {
                 style = MaterialTheme.typography.titleMedium
             )
             Spacer(modifier = Modifier.height(16.dp))
-
-            if (data.values.any { it > 0 }) {
-                val sortedEntries = data.entries.sortedBy { it.key }
-                val barColor = MaterialTheme.colorScheme.primary
-
+            val sortedEntries = data.entries
+                .sortedBy { it.key }
+                .takeLast(14)
+            val barColor = MaterialTheme.colorScheme.primary
+            if (sortedEntries.any { it.value > 0 }) {
                 ColumnChart(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(200.dp),
+                        .height(160.dp),
                     data = sortedEntries.map { (date, count) ->
                         Bars(
                             label = date.format(DateTimeFormatter.ofPattern("d")),
@@ -167,7 +179,8 @@ private fun CompletionChart(data: Map<LocalDate, Int>) {
                                 )
                             )
                         )
-                    }
+                    },
+                    barProperties = BarProperties(thickness = 12.dp)
                 )
             } else {
                 Box(
@@ -189,38 +202,138 @@ private fun CompletionChart(data: Map<LocalDate, Int>) {
 }
 
 // ---------------------------------------------------------------------------
-// Streak Heatmap
+// Monthly Task Calendar (pure Compose, no external library)
 // ---------------------------------------------------------------------------
-
 @Composable
-private fun StreakHeatmap(data: Set<LocalDate>) {
+private fun MonthlyTaskCalendar(monthlyTaskStatus: Map<LocalDate, DayStatus>) {
+    var currentMonth by remember { mutableStateOf(YearMonth.now()) }
+    val today = LocalDate.now()
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "Activity — Last 90 Days",
-                style = MaterialTheme.typography.titleMedium
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(18),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.height(100.dp),
-                userScrollEnabled = false
+            // Month navigation header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                val startDate = LocalDate.now().minusDays(89)
-                items(90) { i ->
-                    val date = startDate.plusDays(i.toLong())
-                    val isActive = data.contains(date)
-                    Box(
-                        modifier = Modifier
-                            .aspectRatio(1f)
-                            .clip(MaterialTheme.shapes.extraSmall)
-                            .background(
-                                if (isActive) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
+                IconButton(onClick = { currentMonth = currentMonth.minusMonths(1) }) {
+                    Icon(Icons.Default.ChevronLeft, contentDescription = "Previous month")
+                }
+                Text(
+                    text = currentMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy")),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                IconButton(
+                    onClick = { currentMonth = currentMonth.plusMonths(1) },
+                    enabled = currentMonth.isBefore(YearMonth.now())
+                ) {
+                    Icon(Icons.Default.ChevronRight, contentDescription = "Next month")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Day-of-week headers (Mon–Sun)
+            val dayHeaders = DayOfWeek.values().map {
+                it.getDisplayName(TextStyle.SHORT, Locale.getDefault()).take(2)
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
+                dayHeaders.forEach { label ->
+                    Text(
+                        text = label,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Build the grid cells
+            val firstDayOfMonth = currentMonth.atDay(1)
+            // Offset so Monday = 0
+            val startOffset = (firstDayOfMonth.dayOfWeek.value - 1)
+            val daysInMonth = currentMonth.lengthOfMonth()
+            val totalCells = startOffset + daysInMonth
+            // Round up to full weeks
+            val gridSize = if (totalCells % 7 == 0) totalCells else totalCells + (7 - totalCells % 7)
+
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(7),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(((gridSize / 7) * 52).dp),
+                userScrollEnabled = false,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                items(gridSize) { index ->
+                    if (index < startOffset || index >= startOffset + daysInMonth) {
+                        // Empty cell
+                        Box(modifier = Modifier.size(40.dp))
+                    } else {
+                        val dayNumber = index - startOffset + 1
+                        val date = currentMonth.atDay(dayNumber)
+                        val isToday = date == today
+                        val status = monthlyTaskStatus[date]
+
+                        Column(
+                            modifier = Modifier.size(40.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            // Day number
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .then(
+                                        if (isToday) Modifier
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primaryContainer)
+                                        else Modifier
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = dayNumber.toString(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isToday)
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    else
+                                        MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            // Task dot(s)
+                            if (status != null) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    if (status == DayStatus.COMPLETED || status == DayStatus.BOTH) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(5.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF4CAF50)) // green
+                                        )
+                                    }
+                                    if (status == DayStatus.PENDING || status == DayStatus.BOTH) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(5.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFF44336)) // red
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -228,13 +341,11 @@ private fun StreakHeatmap(data: Set<LocalDate>) {
 }
 
 // ---------------------------------------------------------------------------
-// Calendar Analytics
+// Due Date Performance
 // ---------------------------------------------------------------------------
-
 @Composable
 private fun CalendarAnalytics(onTime: Int, overdue: Int) {
-    if (onTime == 0 && overdue == 0) return // Hide section if no due-date data
-
+    if (onTime == 0 && overdue == 0) return
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -256,14 +367,12 @@ private fun CalendarAnalytics(onTime: Int, overdue: Int) {
 // ---------------------------------------------------------------------------
 // Personal Bests
 // ---------------------------------------------------------------------------
-
 @Composable
 private fun PersonalBests(
     bestDay: Pair<LocalDate, Int>?,
     bestWeek: Pair<LocalDate, Int>?
 ) {
     if (bestDay == null && bestWeek == null) return
-
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),

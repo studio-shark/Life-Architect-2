@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarToday
@@ -37,6 +36,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import io.lifephysics.architect2.utils.DateIntentParser
@@ -51,25 +53,35 @@ import java.time.ZoneId
  * The inline add-task row shown at the bottom of the Tasks screen.
  *
  * Behaviour:
- * - The text field shows "Add a new quest..." as a placeholder.
- * - The '+' button is greyed out when the field is empty and turns green (primary colour)
- *   as soon as the user starts typing.
- * - When [DateIntentParser] detects a date or time pattern in the text (debounced 300ms),
- *   a calendar icon slides in to the left of the '+' button. Tapping it opens a
- *   [DatePickerDialog] with the parser's best guess pre-filled.
- * - If the parser result is confident the icon is fully opaque; if it is a weak
- *   (time-only) match the icon is dimmed to 40% alpha.
- * - Pressing the IME action or tapping '+' submits the task and resets the row.
+ * - The text field shows "New task..." as a placeholder.
+ * - The '+' button is greyed out when the field is empty and turns the primary
+ *   colour (green) as soon as the user starts typing.
+ * - When [DateIntentParser] detects a date or time pattern in the text (debounced
+ *   300ms), a calendar icon slides in to the left of the '+' button. Tapping it
+ *   opens a [DatePickerDialog] with the parser's best guess pre-filled.
+ * - If the parser result is confident the icon is fully opaque; a weak (time-only)
+ *   match dims the icon to 40% alpha.
+ * - Pressing the IME Done action or tapping '+' submits the task, dismisses the
+ *   keyboard, and resets the row.
+ * - When [requestFocus] is true the text field requests focus immediately, which
+ *   opens the keyboard. The caller must reset the flag via [onFocusConsumed] to
+ *   avoid re-triggering on recomposition.
  *
- * @param onAddTask Called with the task title, difficulty string ("MEDIUM" default),
- *   and optional due date when the user confirms.
+ * @param onAddTask Called with the task title, difficulty string, and optional due
+ *   date when the user confirms.
+ * @param requestFocus When true, the text field requests focus on first composition.
+ * @param onFocusConsumed Called once after the focus request fires so the caller
+ *   can reset the flag.
  */
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 fun AddTaskItem(
-    onAddTask: (title: String, difficulty: String, dueDate: LocalDateTime?) -> Unit
+    onAddTask: (title: String, difficulty: String, dueDate: LocalDateTime?) -> Unit,
+    requestFocus: Boolean = false,
+    onFocusConsumed: () -> Unit = {}
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
 
     var title by remember { mutableStateOf("") }
     var parseResult by remember { mutableStateOf<DateIntentParser.ParseResult?>(null) }
@@ -77,6 +89,14 @@ fun AddTaskItem(
     var confirmedDueDate by remember { mutableStateOf<LocalDateTime?>(null) }
 
     val titleFlow = remember { MutableStateFlow("") }
+
+    // Request focus when the '+' shortcut tab is tapped from another screen
+    LaunchedEffect(requestFocus) {
+        if (requestFocus) {
+            focusRequester.requestFocus()
+            onFocusConsumed()
+        }
+    }
 
     // Debounce the title input and run the date parser on each change
     LaunchedEffect(Unit) {
@@ -114,9 +134,11 @@ fun AddTaskItem(
                 titleFlow.value = it
                 confirmedDueDate = null
             },
-            placeholder = { Text("Add a new quest...") },
+            placeholder = { Text("New task...") },
             singleLine = true,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .focusRequester(focusRequester),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { submit() })
         )
@@ -143,8 +165,7 @@ fun AddTaskItem(
             ) {
                 Icon(
                     imageVector = Icons.Default.CalendarToday,
-                    contentDescription = "Set Due Date",
-                    tint = MaterialTheme.colorScheme.onSecondary
+                    contentDescription = "Set Due Date"
                 )
             }
         }

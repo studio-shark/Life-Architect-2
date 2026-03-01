@@ -13,26 +13,15 @@ import java.time.ZoneId
 import java.time.temporal.WeekFields
 import java.util.Locale
 
-/**
- * Holds the aggregated analytics data for the Analytics screen.
- *
- * @property totalTasksCompleted Total number of tasks the user has ever completed.
- * @property currentStreak The user's current daily streak count.
- * @property totalXp The user's total accumulated XP across all time.
- * @property dailyCompletions A map of [LocalDate] to task count for the last 14 days.
- * @property streakHeatmapData The set of dates in the last 90 days on which at least one task was completed.
- * @property onTimeCompletions Number of tasks with a due date that were completed on time.
- * @property overdueCompletions Number of tasks with a due date that were completed after the due date.
- * @property bestDay The date and count of the user's most productive single day.
- * @property bestWeek The week-start date and count of the user's most productive week.
- * @property isLoading True while data is being loaded from the database.
- */
+enum class DayStatus {
+    PENDING, COMPLETED, BOTH
+}
+
 data class AnalyticsUiState(
     val totalTasksCompleted: Int = 0,
-    val currentStreak: Int = 0,
     val totalXp: Int = 0,
     val dailyCompletions: Map<LocalDate, Int> = emptyMap(),
-    val streakHeatmapData: Set<LocalDate> = emptySet(),
+    val monthlyTaskStatus: Map<LocalDate, DayStatus> = emptyMap(),
     val onTimeCompletions: Int = 0,
     val overdueCompletions: Int = 0,
     val bestDay: Pair<LocalDate, Int>? = null,
@@ -40,13 +29,6 @@ data class AnalyticsUiState(
     val isLoading: Boolean = true
 )
 
-/**
- * ViewModel for the Analytics screen.
- *
- * Combines the user entity and completed task list from [AppRepository] to derive
- * all analytics metrics reactively. All computation is performed off the main thread
- * inside [viewModelScope].
- */
 class AnalyticsViewModel(private val repository: AppRepository) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AnalyticsUiState())
@@ -56,61 +38,73 @@ class AnalyticsViewModel(private val repository: AppRepository) : ViewModel() {
         viewModelScope.launch {
             combine(
                 repository.getUser(),
-                repository.getCompletedTasks()
-            ) { user, completedTasks ->
+                repository.getCompletedTasks(),
+                repository.observePendingTasksForUser("local_user")
+            ) { user, completedTasks, pendingTasks ->
                 if (user == null) return@combine AnalyticsUiState(isLoading = false)
 
                 val zone = ZoneId.systemDefault()
                 val now = LocalDate.now()
                 val weekFields = WeekFields.of(Locale.getDefault())
 
-                // Map each completed task to the date it was completed
                 val tasksByDate = completedTasks
                     .filter { it.completedAt != null }
                     .groupBy { task ->
                         Instant.ofEpochMilli(task.completedAt!!).atZone(zone).toLocalDate()
                     }
 
-                // Daily completions for the last 14 days
                 val dailyCompletions = (0..13).associate { offset ->
                     val day = now.minusDays(offset.toLong())
                     day to (tasksByDate[day]?.size ?: 0)
                 }
 
-                // Best single day
                 val bestDay = tasksByDate
                     .maxByOrNull { it.value.size }
                     ?.let { it.key to it.value.size }
 
-                // Weekly completions and best week
                 val weeklyCompletions = completedTasks
                     .filter { it.completedAt != null }
                     .groupBy { task ->
                         val date = Instant.ofEpochMilli(task.completedAt!!).atZone(zone).toLocalDate()
-                        date.with(weekFields.dayOfWeek(), 1) // Normalize to week start (Monday)
+                        date.with(weekFields.dayOfWeek(), 1)
                     }
                 val bestWeek = weeklyCompletions
                     .maxByOrNull { it.value.size }
                     ?.let { it.key to it.value.size }
 
-                // Heatmap: set of active days in the last 90 days
-                val heatmapStart = now.minusDays(89)
-                val heatmapData = tasksByDate.keys.filter { it >= heatmapStart }.toSet()
-
-                // Due date performance
-                val onTime = completedTasks.count { task ->
-                    task.dueDate != null && task.completedAt != null && task.completedAt <= task.dueDate
+                val onTime = completedTasks.count {
+                    it.dueDate != null && it.completedAt != null && it.completedAt <= it.dueDate
                 }
-                val overdue = completedTasks.count { task ->
-                    task.dueDate != null && task.completedAt != null && task.completedAt > task.dueDate
+                val overdue = completedTasks.count {
+                    it.dueDate != null && it.completedAt != null && it.completedAt > it.dueDate
+                }
+
+                val completedDays = completedTasks
+                    .filter { it.completedAt != null }
+                    .map { Instant.ofEpochMilli(it.completedAt!!).atZone(zone).toLocalDate() }
+                    .toSet()
+
+                val pendingDays = pendingTasks
+                    .filter { it.dueDate != null }
+                    .map { Instant.ofEpochMilli(it.dueDate!!).atZone(zone).toLocalDate() }
+                    .toSet()
+
+                val allDays = completedDays + pendingDays
+                val monthlyStatus = allDays.associateWith { date ->
+                    val hasCompleted = completedDays.contains(date)
+                    val hasPending = pendingDays.contains(date)
+                    when {
+                        hasCompleted && hasPending -> DayStatus.BOTH
+                        hasCompleted -> DayStatus.COMPLETED
+                        else -> DayStatus.PENDING
+                    }
                 }
 
                 AnalyticsUiState(
                     totalTasksCompleted = completedTasks.size,
-                    currentStreak = user.dailyStreak,
                     totalXp = user.totalXp,
                     dailyCompletions = dailyCompletions,
-                    streakHeatmapData = heatmapData,
+                    monthlyTaskStatus = monthlyStatus,
                     onTimeCompletions = onTime,
                     overdueCompletions = overdue,
                     bestDay = bestDay,

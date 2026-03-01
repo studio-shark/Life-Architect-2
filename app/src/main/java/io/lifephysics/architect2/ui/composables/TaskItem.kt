@@ -1,5 +1,7 @@
 package io.lifephysics.architect2.ui.composables
 
+import android.content.Intent
+import android.provider.CalendarContract
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.lifephysics.architect2.data.db.entity.TaskEntity
 import java.time.Instant
@@ -28,24 +31,24 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * Displays a single pending task in a card that visually matches the TrendCard style.
+ * Displays a single pending task in a card.
  *
  * If the task has a [TaskEntity.dueDate], a formatted date label is shown below the
  * title and a calendar icon appears on the right. Tapping the calendar icon fires
- * [onCalendarClick], which opens the system default calendar app at the due date.
+ * an [Intent.ACTION_INSERT] to create a new event in the user's default calendar
+ * app, pre-filled with the task's title and due date.
  *
  * Tapping anywhere else on the card triggers [onCompleted].
  *
  * @param task The task entity to display.
  * @param onCompleted Callback invoked when the card or checkbox is tapped.
- * @param onCalendarClick Callback invoked when the calendar icon is tapped.
  */
 @Composable
 fun TaskItem(
     task: TaskEntity,
-    onCompleted: (TaskEntity) -> Unit,
-    onCalendarClick: (TaskEntity) -> Unit
+    onCompleted: (TaskEntity) -> Unit
 ) {
+    val context = LocalContext.current
     val dueDate: LocalDate? = task.dueDate?.let {
         Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
     }
@@ -90,10 +93,18 @@ fun TaskItem(
                 }
             }
             if (dueDate != null) {
-                IconButton(onClick = { onCalendarClick(task) }) {
+                IconButton(onClick = {
+                    val intent = Intent(Intent.ACTION_INSERT).apply {
+                        data = CalendarContract.Events.CONTENT_URI
+                        putExtra(CalendarContract.Events.TITLE, task.title)
+                        putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, task.dueDate)
+                        putExtra(CalendarContract.EXTRA_EVENT_END_TIME, task.dueDate?.plus(3600_000) ?: 0) // Add 1 hour
+                    }
+                    context.startActivity(intent)
+                }) {
                     Icon(
                         imageVector = Icons.Default.CalendarToday,
-                        contentDescription = "Open in Calendar",
+                        contentDescription = "Add to Calendar",
                         tint = if (isOverdue) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.primary
                     )

@@ -12,13 +12,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -32,20 +37,53 @@ import io.lifephysics.architect2.ui.viewmodel.MainViewModel
  * The History screen.
  *
  * Displays all completed tasks ordered by most recently completed.
+ * A search bar at the top filters the list by task title in real time.
  * Each row has a restore icon that moves the task back to the Tasks tab
  * and triggers the XP loss pop-up.
  */
 @Composable
 fun HistoryScreen(viewModel: MainViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var query by remember { mutableStateOf("") }
+
+    val filteredTasks = if (query.isBlank()) {
+        uiState.completedTasks
+    } else {
+        uiState.completedTasks.filter {
+            it.title.contains(query.trim(), ignoreCase = true)
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
+
+        // Title
         Text(
-            text = "Completed Tasks",
+            text = "History",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 8.dp)
+            modifier = Modifier.padding(start = 24.dp, top = 16.dp, end = 24.dp, bottom = 8.dp)
+        )
+
+        // Search bar
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text("Search completed tasks...") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search"
+                )
+            },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
 
         if (uiState.completedTasks.isEmpty()) {
@@ -54,10 +92,10 @@ fun HistoryScreen(viewModel: MainViewModel) {
                     .fillMaxSize()
                     .padding(24.dp),
                 verticalArrangement = Arrangement.Center,
-                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "No completed quests yet.",
+                    text = "No completed tasks yet.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -67,9 +105,23 @@ fun HistoryScreen(viewModel: MainViewModel) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        } else if (filteredTasks.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "No results for \"$query\"",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(uiState.completedTasks, key = { it.id }) { task ->
+                items(filteredTasks, key = { it.id }) { task ->
                     CompletedTaskRow(
                         task = task,
                         onRestore = { viewModel.onTaskReverted(task) }
