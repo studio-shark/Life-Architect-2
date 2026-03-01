@@ -4,15 +4,18 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.android.gms.ads.MobileAds
 import com.google.android.ump.ConsentInformation
@@ -42,7 +45,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var consentInformation: ConsentInformation
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Enable edge-to-edge BEFORE super.onCreate so the window is configured
+        // before the decor is attached. This removes the empty status-bar strip and
+        // lets the app draw behind both the status bar and the system navigation bar.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        // Tell the window that WE handle system-bar insets (Compose will apply them)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         // --- AdMob: Request consent and initialize SDK ---
         consentInformation = UserMessagingPlatform.getConsentInformation(this)
@@ -55,17 +65,14 @@ class MainActivity : ComponentActivity() {
             this,
             params,
             {
-                // Consent info updated successfully — show form if required
                 UserMessagingPlatform.loadAndShowConsentFormIfRequired(this) { formError ->
                     if (formError != null) {
                         Log.w("AdMob", "Consent form error: ${formError.message}")
                     }
-                    // Initialize the Mobile Ads SDK after consent is resolved
                     initializeMobileAdsSdk()
                 }
             },
             { requestError ->
-                // Consent request failed — initialize anyway so ads still load
                 Log.w("AdMob", "Consent request error: ${requestError.message}")
                 initializeMobileAdsSdk()
             }
@@ -82,6 +89,19 @@ class MainActivity : ComponentActivity() {
             }
 
             AppTheme(darkTheme = isDarkTheme) {
+                // Match the system navigation bar colour to the app's NavigationBar
+                // background so Samsung and other OEM gesture/button bars blend in.
+                val isDark = isDarkTheme
+                SideEffect {
+                    // Set the system navigation bar to transparent so our
+                    // NavigationBar composable draws seamlessly over it on
+                    // all OEM devices (Samsung, OnePlus, etc.).
+                    @Suppress("DEPRECATION")
+                    window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                    val controller = WindowCompat.getInsetsController(window, window.decorView)
+                    controller.isAppearanceLightNavigationBars = !isDark
+                }
+
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

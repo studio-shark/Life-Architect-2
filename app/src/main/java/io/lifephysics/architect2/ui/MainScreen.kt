@@ -3,13 +3,13 @@ package io.lifephysics.architect2.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -17,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -46,14 +47,6 @@ import io.lifephysics.architect2.ui.viewmodel.MainViewModel
 fun MainScreen(viewModel: MainViewModel) {
     val navController = rememberNavController()
 
-    // The four real navigation destinations (no User/Profile tab)
-    val navScreens = listOf(
-        Screen.Tasks,
-        Screen.History,
-        Screen.Trending,
-        Screen.Analytics
-    )
-
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     val analyticsViewModel: AnalyticsViewModel = viewModel(
@@ -72,8 +65,14 @@ fun MainScreen(viewModel: MainViewModel) {
 
                     // Tasks tab
                     NavigationBarItem(
-                        icon = { Icon(Screen.Tasks.icon, contentDescription = Screen.Tasks.label) },
-                        label = { Text(Screen.Tasks.label) },
+                        icon = {
+                            Icon(
+                                imageVector = Screen.Tasks.icon,
+                                contentDescription = Screen.Tasks.label,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        },
+                        label = null,
                         selected = currentDestination?.hierarchy?.any { it.route == Screen.Tasks.route } == true,
                         onClick = {
                             navController.navigate(Screen.Tasks.route) {
@@ -86,8 +85,14 @@ fun MainScreen(viewModel: MainViewModel) {
 
                     // History tab
                     NavigationBarItem(
-                        icon = { Icon(Screen.History.icon, contentDescription = Screen.History.label) },
-                        label = { Text(Screen.History.label) },
+                        icon = {
+                            Icon(
+                                imageVector = Screen.History.icon,
+                                contentDescription = Screen.History.label,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        },
+                        label = null,
                         selected = currentDestination?.hierarchy?.any { it.route == Screen.History.route } == true,
                         onClick = {
                             navController.navigate(Screen.History.route) {
@@ -103,13 +108,13 @@ fun MainScreen(viewModel: MainViewModel) {
                         icon = {
                             Icon(
                                 imageVector = Icons.Default.AddCircle,
-                                contentDescription = "New Task"
+                                contentDescription = "New Task",
+                                modifier = Modifier.size(30.dp)
                             )
                         },
-                        label = { Text("+") },
+                        label = null,
                         selected = false,
                         onClick = {
-                            // Navigate to Tasks tab and signal focus
                             navController.navigate(Screen.Tasks.route) {
                                 popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                 launchSingleTop = true
@@ -121,8 +126,14 @@ fun MainScreen(viewModel: MainViewModel) {
 
                     // Trending tab
                     NavigationBarItem(
-                        icon = { Icon(Screen.Trending.icon, contentDescription = Screen.Trending.label) },
-                        label = { Text(Screen.Trending.label) },
+                        icon = {
+                            Icon(
+                                imageVector = Screen.Trending.icon,
+                                contentDescription = Screen.Trending.label,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        },
+                        label = null,
                         selected = currentDestination?.hierarchy?.any { it.route == Screen.Trending.route } == true,
                         onClick = {
                             navController.navigate(Screen.Trending.route) {
@@ -135,8 +146,14 @@ fun MainScreen(viewModel: MainViewModel) {
 
                     // Analytics tab
                     NavigationBarItem(
-                        icon = { Icon(Screen.Analytics.icon, contentDescription = Screen.Analytics.label) },
-                        label = { Text(Screen.Analytics.label) },
+                        icon = {
+                            Icon(
+                                imageVector = Screen.Analytics.icon,
+                                contentDescription = Screen.Analytics.label,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        },
+                        label = null,
                         selected = currentDestination?.hierarchy?.any { it.route == Screen.Analytics.route } == true,
                         onClick = {
                             navController.navigate(Screen.Analytics.route) {

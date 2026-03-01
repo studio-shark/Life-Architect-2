@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,7 +59,6 @@ fun TasksScreen(
             modifier = Modifier.padding(start = 24.dp, top = 16.dp, end = 24.dp, bottom = 8.dp)
         )
 
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
         Spacer(modifier = Modifier.height(8.dp))
 
         // Task list fills remaining space
@@ -77,8 +75,6 @@ fun TasksScreen(
                 )
             }
         }
-
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
         // AddTaskItem pinned at bottom
         AddTaskItem(

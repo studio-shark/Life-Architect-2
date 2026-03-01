@@ -1,6 +1,8 @@
 package io.lifephysics.architect2
 
 import android.app.Application
+import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
 import io.lifephysics.architect2.data.AppRepository
 import io.lifephysics.architect2.data.db.AppDatabase
 import io.lifephysics.architect2.data.db.entity.UserEntity
@@ -34,6 +36,21 @@ class LifeArchitectApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // ── AdMob initialisation ───────────────────────────────────────────
+        // Register test devices so the SDK returns fully populated test ads
+        // during development. The hash below is the emulator's device ID
+        // extracted from Logcat (UserMessagingPlatform tag).
+        // TODO: Remove this block (or clear the list) before publishing.
+        val testDeviceIds = listOf("B3EEABB8EE11C2BE770B684D95219ECB")
+        MobileAds.setRequestConfiguration(
+            RequestConfiguration.Builder()
+                .setTestDeviceIds(testDeviceIds)
+                .build()
+        )
+        MobileAds.initialize(this) { /* initialisation complete */ }
+
+        // ── Database seeding ───────────────────────────────────────────────
         // Ensure the local user row exists before any ViewModel tries to read it.
         // This is idempotent — upsertUser will update if the row already exists,
         // or insert a fresh default user if it does not.
