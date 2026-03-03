@@ -1,6 +1,7 @@
 package io.lifephysics.architect2.ui.composables
 
 import android.content.Intent
+import android.net.Uri
 import android.provider.CalendarContract
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -34,9 +35,8 @@ import java.time.format.DateTimeFormatter
  * Displays a single pending task in a card.
  *
  * If the task has a [TaskEntity.dueDate], a formatted date label is shown below the
- * title and a calendar icon appears on the right. Tapping the calendar icon fires
- * an [Intent.ACTION_INSERT] to create a new event in the user's default calendar
- * app, pre-filled with the task's title and due date.
+ * title and a calendar icon appears on the right. Tapping the calendar icon opens the
+ * default calendar app to the day of the event so the user can view the existing event.
  *
  * Tapping anywhere else on the card triggers [onCompleted].
  *
@@ -94,17 +94,21 @@ fun TaskItem(
             }
             if (dueDate != null) {
                 IconButton(onClick = {
-                    val intent = Intent(Intent.ACTION_INSERT).apply {
-                        data = CalendarContract.Events.CONTENT_URI
-                        putExtra(CalendarContract.Events.TITLE, task.title)
-                        putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, task.dueDate)
-                        putExtra(CalendarContract.EXTRA_EVENT_END_TIME, task.dueDate?.plus(3600_000) ?: 0) // Add 1 hour
+                    // Open the default calendar app to the day of the event so the
+                    // user can view the existing event — not create a new one.
+                    val epochMillis = task.dueDate ?: return@IconButton
+                    val uri = Uri.parse("content://com.android.calendar/time/$epochMillis")
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = uri
+                        putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, epochMillis)
+                        putExtra(CalendarContract.EXTRA_EVENT_END_TIME, epochMillis + 3_600_000L)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
                     }
                     context.startActivity(intent)
                 }) {
                     Icon(
                         imageVector = Icons.Default.CalendarToday,
-                        contentDescription = "Add to Calendar",
+                        contentDescription = "View in Calendar",
                         tint = if (isOverdue) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.primary
                     )

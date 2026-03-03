@@ -6,13 +6,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.isImeVisible
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -78,7 +75,7 @@ fun TasksScreen(
         modifier = Modifier
             .fillMaxSize()
             // Smoothly follows keyboard edge when open; clears nav bar when closed
-            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+            .imePadding()
     ) {
 
         LazyColumn(
@@ -113,7 +110,7 @@ fun TasksScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .padding(top = 8.dp, bottom = 8.dp),
+                .padding(top = 8.dp, bottom = 6.dp),
             onAddTask = { title, difficulty, dueDate ->
                 viewModel.onAddTask(title, difficulty, dueDate)
             },

@@ -12,6 +12,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -50,7 +51,8 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
+import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.TimeInput
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
@@ -64,13 +66,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -138,6 +144,9 @@ fun AddTaskItem(
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
     var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
+
+    // Calendar confirmation popup
+    var showCalendarPopup by remember { mutableStateOf(false) }
 
     // Mic active state — true while SpeechRecognizer is listening
     var isMicActive by remember { mutableStateOf(false) }
@@ -318,6 +327,7 @@ fun AddTaskItem(
                 Log.e(TAG, "Calendar event insert failed", e); null
             }
             Log.d(TAG, "Calendar event inserted: uri=$uri")
+            if (uri != null) showCalendarPopup = true
 
             // Request an immediate sync so the event appears in Google Calendar without delay
             if (uri != null) {
@@ -413,139 +423,141 @@ fun AddTaskItem(
         }
     }
 
-    // ── Card panel ─────────────────────────────────────────────────────────
-    //
-    // imePadding() is the key to WhatsApp-style behaviour: when the software
-    // keyboard opens, this modifier adds bottom padding equal to the keyboard
-    // height, pushing the card up so it always sits above the keyboard.
-    // The parent screen must use WindowCompat.setDecorFitsSystemWindows(window, false)
-    // and Modifier.fillMaxSize() so that insets are propagated correctly.
+    // ── Card panel + popup overlay ─────────────────────────────────────────
 
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+    Box {
+        Card(
+            modifier = modifier,
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
 
-            // ── Text input area ────────────────────────────────────────────
-            BasicTextField(
-                value = title,
-                onValueChange = {
-                    title = it
-                    titleFlow.value = it
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 16.dp, bottom = 12.dp)
-                    .focusRequester(focusRequester),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                // ImeAction.Done shows the "✓" key; handler only clears focus
-                // (lowers keyboard) — does NOT submit the task.
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(
-                    onDone = { focusManager.clearFocus() }   // dismiss keyboard, keep text
-                ),
-                decorationBox = { innerTextField ->
-                    if (title.isEmpty()) {
-                        Text(
-                            text = "Task",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                // ── Text input area ────────────────────────────────────────────
+                BasicTextField(
+                    value = title,
+                    onValueChange = {
+                        title = it
+                        titleFlow.value = it
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 16.dp, bottom = 12.dp)
+                        .focusRequester(focusRequester),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    // ImeAction.Done shows the "✓" key; handler only clears focus
+                    // (lowers keyboard) — does NOT submit the task.
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = { focusManager.clearFocus() }   // dismiss keyboard, keep text
+                    ),
+                    decorationBox = { innerTextField ->
+                        if (title.isEmpty()) {
+                            Text(
+                                text = "Task",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        innerTextField()
+                    }
+                )
+
+                // ── Internal divider ───────────────────────────────────────────
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                    thickness = 0.5.dp
+                )
+
+                // ── Action row ─────────────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+                ) {
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // Mic button — shows animated dots while listening, mic icon otherwise
+                    FilledIconButton(
+                        onClick = { startListening() },
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary.copy(
+                                alpha = when {
+                                    isMicActive -> 1f
+                                    hasText -> 0.6f
+                                    else -> 0.25f
+                                }
+                            ),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        if (isMicActive) {
+                            RecordingDotsIndicator()
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Mic,
+                                contentDescription = "Voice input",
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    // Calendar button
+                    FilledIconButton(
+                        onClick = { openCalendarPicker() },
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = Purple.copy(alpha = if (hasText) 1f else 0.25f),
+                            contentColor = Color.White
+                        ),
+                        enabled = hasText
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarToday,
+                            contentDescription = "Add to Calendar",
+                            modifier = Modifier.size(20.dp)
                         )
                     }
-                    innerTextField()
-                }
-            )
 
-            // ── Internal divider ───────────────────────────────────────────
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                thickness = 0.5.dp
-            )
-
-            // ── Action row ─────────────────────────────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
-            ) {
-                Spacer(modifier = Modifier.weight(1f))
-
-                // Mic button — shows animated dots while listening, mic icon otherwise
-                FilledIconButton(
-                    onClick = { startListening() },
-                    modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary.copy(
-                            alpha = when {
-                                isMicActive -> 1f
-                                hasText -> 0.6f
-                                else -> 0.25f
-                            }
+                    // Add button
+                    FilledIconButton(
+                        onClick = { submitTaskOnly() },
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = BrandGreen.copy(alpha = if (hasText) 1f else 0.25f),
+                            contentColor = Color.White
                         ),
-                        contentColor = Color.White
-                    )
-                ) {
-                    if (isMicActive) {
-                        RecordingDotsIndicator()
-                    } else {
+                        enabled = hasText
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = "Voice input",
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add Task",
                             modifier = Modifier.size(20.dp)
                         )
                     }
                 }
-
-                // Calendar button
-                FilledIconButton(
-                    onClick = { openCalendarPicker() },
-                    modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = Purple.copy(alpha = if (hasText) 1f else 0.25f),
-                        contentColor = Color.White
-                    ),
-                    enabled = hasText
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CalendarToday,
-                        contentDescription = "Add to Calendar",
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // Add button
-                FilledIconButton(
-                    onClick = { submitTaskOnly() },
-                    modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = BrandGreen.copy(alpha = if (hasText) 1f else 0.25f),
-                        contentColor = Color.White
-                    ),
-                    enabled = hasText
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add Task",
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
             }
         }
-    }
+
+        // ── Calendar confirmation popup ────────────────────────────────────────
+        if (showCalendarPopup) {
+            CalendarConfirmPopup(onDismiss = { showCalendarPopup = false })
+        }
+
+    } // end Box
 
     // ── Date picker dialog (step 1 of 2) ──────────────────────────────────
 
@@ -554,7 +566,18 @@ fun AddTaskItem(
             ?.atZone(ZoneId.systemDefault())
             ?.toInstant()
             ?.toEpochMilli()
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+        val todayStartMillis = java.time.LocalDate.now()
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = initialMillis,
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                    return utcTimeMillis >= todayStartMillis
+                }
+            }
+        )
 
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
@@ -580,7 +603,7 @@ fun AddTaskItem(
         val timePickerState = rememberTimePickerState(
             initialHour = parsedTime?.hour ?: 9,
             initialMinute = parsedTime?.minute ?: 0,
-            is24Hour = false
+            is24Hour = true
         )
 
         Dialog(onDismissRequest = { showTimePicker = false }) {
@@ -603,7 +626,7 @@ fun AddTaskItem(
                             .padding(bottom = 16.dp)
                     )
 
-                    TimePicker(state = timePickerState)
+                    TimeInput(state = timePickerState)
 
                     Spacer(modifier = Modifier.height(16.dp))
 
@@ -676,5 +699,47 @@ private fun RecordingDotsIndicator() {
                     )
             )
         }
+    }
+}
+
+/**
+ * A floating "Added to Calendar" confirmation popup that animates upward and fades out,
+ * matching the style of [XpPopup].
+ *
+ * @param onDismiss Called when the animation completes.
+ */
+@Composable
+private fun CalendarConfirmPopup(onDismiss: () -> Unit) {
+    val yOffset = remember { Animatable(0f) }
+    val alpha = remember { Animatable(1f) }
+
+    LaunchedEffect(Unit) {
+        yOffset.animateTo(
+            targetValue = -120f,
+            animationSpec = tween(durationMillis = 1500)
+        )
+        alpha.animateTo(
+            targetValue = 0f,
+            animationSpec = tween(durationMillis = 400)
+        )
+        onDismiss()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset(y = yOffset.value.dp)
+            .alpha(alpha.value)
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "Added to Calendar",
+            color = Color(0xFF4CAF50),   // same green as XP gain
+            fontSize = 22.sp,
+            fontWeight = FontWeight.ExtraBold,
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.headlineSmall
+        )
     }
 }
