@@ -16,15 +16,16 @@ import io.lifephysics.architect2.data.db.entity.UserEntity
 
 /**
  * Version history:
- *   1 — Initial schema
- *   2 — Added task completion fields
- *   3 — Added OwnedAvatarEntity; replaced ownedAvatarIds/selectedAvatarId with equippedAvatarId
- *   4 — Replaced OwnedAvatarEntity with OwnedPartEntity; replaced equippedAvatarId with avatarConfig string
- *   5 — Removed OwnedPartEntity and coins column (shop system decommissioned)
- *   6 — Added streak and daily task count columns to users table
- *   7 — Added weekly and monthly streak claim flags to users table
- *   8 — Added nullable dueDate column to tasks table
- *   9 — Removed FOREIGN KEY constraints from tasks table (single-user offline app; constraints caused crashes)
+ *   1  — Initial schema
+ *   2  — Added task completion fields
+ *   3  — Added OwnedAvatarEntity; replaced ownedAvatarIds/selectedAvatarId with equippedAvatarId
+ *   4  — Replaced OwnedAvatarEntity with OwnedPartEntity; replaced equippedAvatarId with avatarConfig string
+ *   5  — Removed OwnedPartEntity and coins column (shop system decommissioned)
+ *   6  — Added streak and daily task count columns to users table
+ *   7  — Added weekly and monthly streak claim flags to users table
+ *   8  — Added nullable dueDate column to tasks table
+ *   9  — Removed FOREIGN KEY constraints from tasks table (single-user offline app; constraints caused crashes)
+ *   10 — Added is_pinned and is_urgent boolean columns to tasks table
  */
 @Database(
     entities = [
@@ -32,7 +33,7 @@ import io.lifephysics.architect2.data.db.entity.UserEntity
         GoalEntity::class,
         TaskEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -120,6 +121,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration v9 → v10: adds is_pinned and is_urgent boolean columns to tasks table.
+         *
+         * Both default to 0 (false) so all existing rows are unaffected.
+         * SQLite stores Kotlin Booleans as INTEGER (0/1); Room handles the mapping automatically.
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE tasks ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE tasks ADD COLUMN is_urgent INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -127,7 +141,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "life_architect_database"
                 )
-                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,6 +53,14 @@ fun TasksScreen(
     val listState = rememberLazyListState()
 
     val isImeVisible = WindowInsets.isImeVisible
+
+    // Pinned tasks float to the top; within each group order is preserved.
+    // Must be computed here (composable scope) — remember() cannot be called
+    // inside a LazyListScope lambda (not a @Composable context).
+    val sortedTasks = remember(uiState.pendingTasks) {
+        uiState.pendingTasks.sortedByDescending { it.isPinned }
+    }
+
     val totalItems = 1 + uiState.pendingTasks.size
 
     // When keyboard opens, wait 100 ms for layout to settle then scroll to last item
@@ -97,10 +106,11 @@ fun TasksScreen(
                 )
             }
 
-            items(uiState.pendingTasks, key = { it.id }) { task ->
+            items(sortedTasks, key = { it.id }) { task ->
                 TaskItem(
                     task = task,
-                    onCompleted = { viewModel.onTaskCompleted(task) }
+                    onCompleted = { viewModel.onTaskCompleted(task) },
+                    onUpdate = { viewModel.onUpdateTask(it) }
                 )
             }
         }

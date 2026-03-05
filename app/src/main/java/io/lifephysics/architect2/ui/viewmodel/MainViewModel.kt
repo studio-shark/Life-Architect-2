@@ -323,8 +323,13 @@ class MainViewModel(
         }
 
     /**
-     * Opens the system's default calendar application at the task's due date.
+     * Persists any change to a task (pin, urgent, title edit, due-date edit).
+     * Called from [TaskItem] via the three-dot menu.
      */
+    fun onUpdateTask(task: TaskEntity) = viewModelScope.launch {
+        repository.updateTask(task)
+    }
+
     fun onCalendarClick(task: TaskEntity) {
         val dueDate = task.dueDate ?: return
         val intent = Intent(Intent.ACTION_VIEW).apply {

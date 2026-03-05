@@ -26,6 +26,8 @@ import java.util.UUID
  * @property createdAt The timestamp when the task was created.
  * @property completedAt The timestamp when the task was completed.
  * @property dueDate The timestamp for the task's deadline.
+ * @property isPinned When true the task is pinned to the top of the list and its title is shown in amber/yellow.
+ * @property isUrgent When true the task is marked urgent and its title is shown in red.
  */
 @Entity(tableName = "tasks")
 data class TaskEntity(
@@ -60,7 +62,15 @@ data class TaskEntity(
     val completedAt: Long? = null,
 
     @ColumnInfo(name = "due_date")
-    val dueDate: Long? = null
+    val dueDate: Long? = null,
+
+    /** When true, this task floats to the top of the list and its title is rendered in amber/yellow. */
+    @ColumnInfo(name = "is_pinned", defaultValue = "0")
+    val isPinned: Boolean = false,
+
+    /** When true, this task is marked as urgent and its title is rendered in red. */
+    @ColumnInfo(name = "is_urgent", defaultValue = "0")
+    val isUrgent: Boolean = false
 )
 
 /**
