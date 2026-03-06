@@ -33,11 +33,11 @@ The application is in active development. The current feature set provides the c
 
 This project is a case study in modern, native Android development, emphasizing best practices and a clean, scalable architecture.
 
-- **100% **[**Kotlin**](https://kotlinlang.org/) — The entire codebase is written in Kotlin, leveraging coroutines and Flow for asynchronous operations.
+- **100%** [**Kotlin**](https://kotlinlang.org/) — The entire codebase is written in Kotlin, leveraging coroutines and Flow for asynchronous operations.
 
 - [**Jetpack Compose**](https://developer.android.com/jetpack/compose) — The UI is built entirely with Compose, enabling a declarative, reactive, and maintainable user interface.
 
-- [**Room Database**](https://developer.android.com/training/data-storage/room) — A robust, local SQLite database for offline-first data persistence, with KSP code generation.
+- [**Room Database**](https://developer.android.com/training/data-storage/room) — A local SQLite database for offline-first data persistence, with KSP code generation.
 
 - **Model-View-Intent (MVI) Architecture** — A unidirectional data flow pattern that ensures a predictable and debuggable application state.
 
