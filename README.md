@@ -1,14 +1,13 @@
 # Life Architect 2
 
-**Gamify your goals, build your ideal self.**
+**Gamify your goals.**
 
 ---
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Kotlin Version](https://img.shields.io/badge/Kotlin-2.0.21-blue.svg)](https://kotlinlang.org) [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-BOM%202026-blue)](https://developer.android.com/jetpack/compose)
 
-**Life Architect 2** is a native Android application designed to transform personal development into an engaging and rewarding journey. By applying principles of gamification, the app helps users define their goals, break them down into actionable tasks (or "quests"), and track their progress through a system of experience points (XP), levels, and ranks. It serves as a powerful tool for anyone looking to build habits, learn new skills, and systematically construct a better life.
+**Life Architect 2** is a native Android application designed to transform personal development into an engaging and rewarding journey. By applying principles of gamification, the app helps users define their goals, break them down into actionable tasks, and track their progress through a system of experience points (XP), levels, and data. It serves as an efficient tool for anyone looking to build habits, learn new skills, and systematically construct a better life.
 
-This repository contains the complete source code for the application, written in 100% Kotlin and built with modern Android development practices.
 
 ---
 
@@ -19,11 +18,11 @@ The application is in active development. The current feature set provides the c
 | Feature | Status | Description |
 | --- | --- | --- |
 | **Task Management** | ✅ Complete | Create, track, and complete tasks ("quests"). |
-| **Gamification Engine** | ✅ Complete | Earn XP and coins for completing tasks. |
-| **Leveling System** | ✅ Complete | Progress through ranks from *Fragment Seeker* to *System Architect*. |
-| **MVI Architecture** | ✅ Complete | A robust, scalable, and testable Model-View-Intent architecture. |
+| **Gamification Engine** | ✅ Complete | Earn XP for completing tasks. |
+| **Leveling System** | ✅ Complete | Progress through ranks. |
+| **MVI Architecture** | ✅ Complete | A scalable and testable Model-View-Intent architecture. |
 | **Offline-First Storage** | ✅ Complete | All data is stored locally using RoomDB for instant access. |
-| **Goal Management** | 🚧 Planned | Group tasks under larger goals or projects. |
+| **Goal Management** | 🚧 Planned | Group tasks under larger goals or migrate to other projects. |
 | **Analytics & Insights** | ✅ Complete | Visualize progress with charts and historical data. |
 | **Trending Feed** | ✅ Complete | A daily feed of trending topics . |
 | **Google Sign-In** | 🚧 Planned | Sync progress across devices with cloud backup. |
