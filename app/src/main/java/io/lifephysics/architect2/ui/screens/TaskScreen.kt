@@ -110,7 +110,10 @@ fun TasksScreen(
                 TaskItem(
                     task = task,
                     onCompleted = { viewModel.onTaskCompleted(task) },
-                    onUpdate = { viewModel.onUpdateTask(it) }
+                    onUpdate = { viewModel.onUpdateTask(it) },
+                    onUpdateDueDate = { oldMillis, newMillis ->
+                        viewModel.onUpdateTaskDueDate(task, oldMillis, newMillis)
+                    }
                 )
             }
         }

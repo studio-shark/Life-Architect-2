@@ -1,9 +1,12 @@
 package io.lifephysics.architect2.ui.viewmodel
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.provider.CalendarContract
+import android.provider.CalendarContract.Events
+import java.time.Instant
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.lifephysics.architect2.data.AppRepository
@@ -323,12 +326,85 @@ class MainViewModel(
         }
 
     /**
-     * Persists any change to a task (pin, urgent, title edit, due-date edit).
-     * Called from [TaskItem] via the three-dot menu.
+     * Persists any change to a task (pin, urgent, title edit).
      */
     fun onUpdateTask(task: TaskEntity) = viewModelScope.launch {
         repository.updateTask(task)
     }
+
+    /**
+     * Updates the task's due date and syncs the change to the device calendar.
+     *
+     * Strategy:
+     * - If the **date** (day) changed → delete the old calendar event (matched by
+     *   title + begin time) and insert a brand-new one on the new date.
+     * - If only the **time** changed → update the existing event in-place via
+     *   [ContentResolver.update] with a WHERE clause on title + old begin time.
+     *
+     * Because we do not store the calendar event ID in the database, both paths
+     * use a title + begin-time query to locate the existing event.
+     *
+     * @param task      The task entity before the change.
+     * @param oldMillis The previous due-date epoch millis (may be null if no date was set).
+     * @param newMillis The new due-date epoch millis chosen by the user.
+     */
+    fun onUpdateTaskDueDate(task: TaskEntity, oldMillis: Long?, newMillis: Long) =
+        viewModelScope.launch {
+            // 1. Persist the new due date in the database
+            repository.updateTask(task.copy(dueDate = newMillis))
+
+            val cr = appContext.contentResolver
+
+            // Determine whether the calendar day changed
+            val oldDay = oldMillis?.let {
+                Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
+            }
+            val newDay = Instant.ofEpochMilli(newMillis)
+                .atZone(ZoneId.systemDefault()).toLocalDate()
+            val dayChanged = oldDay != newDay
+
+            if (oldMillis != null) {
+                if (dayChanged) {
+                    // Delete the old event matched by title + begin time
+                    cr.delete(
+                        Events.CONTENT_URI,
+                        "${Events.TITLE} = ? AND ${Events.DTSTART} = ?",
+                        arrayOf(task.title, oldMillis.toString())
+                    )
+                    // Insert a new event on the new date
+                    val values = ContentValues().apply {
+                        put(Events.TITLE, task.title)
+                        put(Events.DTSTART, newMillis)
+                        put(Events.DTEND, newMillis + 3_600_000L)
+                        put(Events.EVENT_TIMEZONE, ZoneId.systemDefault().id)
+                        put(Events.CALENDAR_ID, 1L)
+                    }
+                    cr.insert(Events.CONTENT_URI, values)
+                } else {
+                    // Time-only change: update the existing event in-place
+                    val values = ContentValues().apply {
+                        put(Events.DTSTART, newMillis)
+                        put(Events.DTEND, newMillis + 3_600_000L)
+                    }
+                    cr.update(
+                        Events.CONTENT_URI,
+                        values,
+                        "${Events.TITLE} = ? AND ${Events.DTSTART} = ?",
+                        arrayOf(task.title, oldMillis.toString())
+                    )
+                }
+            } else {
+                // No previous calendar event — insert a new one
+                val values = ContentValues().apply {
+                    put(Events.TITLE, task.title)
+                    put(Events.DTSTART, newMillis)
+                    put(Events.DTEND, newMillis + 3_600_000L)
+                    put(Events.EVENT_TIMEZONE, ZoneId.systemDefault().id)
+                    put(Events.CALENDAR_ID, 1L)
+                }
+                cr.insert(Events.CONTENT_URI, values)
+            }
+        }
 
     fun onCalendarClick(task: TaskEntity) {
         val dueDate = task.dueDate ?: return
