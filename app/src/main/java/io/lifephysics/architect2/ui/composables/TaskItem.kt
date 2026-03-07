@@ -1,8 +1,5 @@
 package io.lifephysics.architect2.ui.composables
 
-import android.content.Intent
-import android.net.Uri
-import android.provider.CalendarContract
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -55,7 +52,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.platform.LocalContext
 import io.lifephysics.architect2.data.db.entity.TaskEntity
 import java.time.Instant
 import java.time.LocalDate
@@ -96,10 +92,10 @@ fun TaskItem(
     onUpdate: (TaskEntity) -> Unit,
     onUpdateDueDate: (oldMillis: Long?, newMillis: Long) -> Unit
 ) {
-    val context = LocalContext.current
-    val dueDate: LocalDate? = task.dueDate?.let {
-        Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
+    val dueDateTime: LocalDateTime? = task.dueDate?.let {
+        Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDateTime()
     }
+    val dueDate: LocalDate? = dueDateTime?.toLocalDate()
     val isOverdue = dueDate != null && dueDate.isBefore(LocalDate.now())
 
     // ── Inline editing ──────────────────────────────────────────────────────
@@ -208,9 +204,11 @@ fun TaskItem(
                     )
                 }
                 if (dueDate != null) {
-                    val label = dueDate.format(DateTimeFormatter.ofPattern("MMM d"))
+                    val dateLabel = dueDate.format(DateTimeFormatter.ofPattern("MMM d"))
+                    val timeLabel = dueDateTime.format(DateTimeFormatter.ofPattern("HH:mm"))
+                    val label = "$dateLabel · $timeLabel"
                     Text(
-                        text  = if (isOverdue) "Overdue — $label" else "Due $label",
+                        text  = if (isOverdue) "Overdue — $label" else label,
                         style = MaterialTheme.typography.bodySmall,
                         color = if (isOverdue) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant
@@ -221,33 +219,16 @@ fun TaskItem(
             // ── Action icons (compact, right-aligned) ───────────────────────
 
             // Calendar icon — only shown when a due date is set.
-            // Tap  → open calendar app to view the event.
-            // Long-press → open DatePicker → TimeInput to edit date & time.
+            // Tap → opens DatePicker → TimeInput flow to edit the date & time.
+            // The updated date/time is synced to the device calendar via onUpdateDueDate.
             if (dueDate != null) {
-                androidx.compose.foundation.layout.Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .combinedClickable(
-                            onClick = {
-                                val epochMillis = task.dueDate ?: return@combinedClickable
-                                val intent = Intent(
-                                    Intent.ACTION_VIEW,
-                                    Uri.parse("content://com.android.calendar/time/$epochMillis")
-                                ).apply {
-                                    putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, epochMillis)
-                                    putExtra(CalendarContract.EXTRA_EVENT_END_TIME, epochMillis + 3_600_000L)
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                                            Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-                                }
-                                context.startActivity(intent)
-                            },
-                            onLongClick = { showDatePicker = true }
-                        ),
-                    contentAlignment = Alignment.Center
+                IconButton(
+                    onClick = { showDatePicker = true },
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.CalendarToday,
-                        contentDescription = "Calendar — tap to view, hold to edit",
+                        contentDescription = "Edit date & time",
                         tint = if (isOverdue) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
