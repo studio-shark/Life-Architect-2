@@ -18,9 +18,6 @@ class AppRepository(
 
     fun observeUser(googleId: String): Flow<UserEntity?> = userDao.observeUser(googleId)
 
-    /** Flow-based user observation — use for UI state only. */
-    fun getUser(): Flow<UserEntity?> = userDao.getLocalUser()
-
     /**
      * Direct suspend read of the local user — use inside coroutines where the
      * result is needed immediately (e.g. before a foreign-key insert).
@@ -40,7 +37,6 @@ class AppRepository(
     fun observeTasksForUser(userId: String): Flow<List<TaskEntity>> = taskDao.observeTasksForUser(userId)
     fun observePendingTasksForUser(userId: String): Flow<List<TaskEntity>> = taskDao.observePendingTasksForUser(userId)
     fun getCompletedTasks(): Flow<List<TaskEntity>> = taskDao.observeCompletedTasksForUser("local_user")
-    fun getAllTasks(): Flow<List<TaskEntity>> = observeTasksForUser("local_user")
     suspend fun upsertTask(task: TaskEntity) = taskDao.upsertTask(task)
     suspend fun insertTask(task: TaskEntity) = upsertTask(task)
     suspend fun updateTask(task: TaskEntity) = upsertTask(task)

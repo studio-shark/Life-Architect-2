@@ -55,7 +55,7 @@ class AnalyticsViewModel(private val repository: AppRepository) : ViewModel() {
     init {
         viewModelScope.launch {
             combine(
-                repository.getUser(),
+                repository.observeUser("local_user"),
                 repository.getCompletedTasks(),
                 repository.observePendingTasksForUser("local_user"),
                 _selectedDay

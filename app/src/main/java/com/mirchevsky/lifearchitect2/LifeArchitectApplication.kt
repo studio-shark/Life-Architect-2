@@ -9,7 +9,6 @@ import com.mirchevsky.lifearchitect2.data.db.entity.UserEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -55,7 +54,7 @@ class LifeArchitectApplication : Application() {
         // This is idempotent — upsertUser will update if the row already exists,
         // or insert a fresh default user if it does not.
         applicationScope.launch {
-            val existing = repository.getUser().first()
+            val existing = repository.getUserOnce()
             if (existing == null) {
                 repository.upsertUser(UserEntity(googleId = "local_user"))
             }

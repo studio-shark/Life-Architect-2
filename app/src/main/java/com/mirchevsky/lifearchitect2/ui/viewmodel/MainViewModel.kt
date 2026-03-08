@@ -109,7 +109,7 @@ class MainViewModel(
     init {
         viewModelScope.launch {
             combine(
-                repository.getUser(),
+                repository.observeUser("local_user"),
                 repository.observePendingTasksForUser("local_user"),
                 repository.getCompletedTasks()
             ) { user, pending, completed ->
