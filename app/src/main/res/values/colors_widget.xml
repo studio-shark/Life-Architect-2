@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    colors_widget.xml  (default = light mode)
+    ─────────────────────────────────────────────────────────────────────────
+    Widget colour tokens for LIGHT mode.
+    The dark-mode counterparts live in res/values-night/colors_widget.xml.
+
+    Android automatically picks the correct file based on the system's
+    night-mode setting. Because AppWidgetManager.updateAppWidget() is called
+    on every configuration change, the widget re-renders with the correct
+    colours whenever the user switches between light and dark mode.
+
+    Place at: app/src/main/res/values/colors_widget.xml
+-->
+<resources>
+    <!-- Widget card background — near-white in light mode -->
+    <color name="widget_background">#F5F5F5</color>
+
+    <!-- Primary text (title, task names) — dark in light mode -->
+    <color name="widget_text_primary">#1C1C2E</color>
+
+    <!-- Secondary text (due dates, empty state) — muted dark -->
+    <color name="widget_text_secondary">#991C1C2E</color>
+
+    <!-- Divider line — subtle dark -->
+    <color name="widget_divider">#33000000</color>
+</resources>

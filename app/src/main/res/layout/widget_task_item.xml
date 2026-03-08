@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_item_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="4dp"
+    android:paddingEnd="4dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp"
+    android:minHeight="40dp">
+
+    <!--
+        ImageView instead of TextView so that setColorFilter(int) via
+        RemoteViews.setInt() targets a valid method on the view class.
+        TextView does not expose setColorFilter(int), making the reflective
+        call silently fail or crash on some API levels.
+    -->
+    <ImageView
+        android:id="@+id/widget_item_dot"
+        android:layout_width="8dp"
+        android:layout_height="8dp"
+        android:layout_marginEnd="10dp"
+        android:src="@drawable/widget_dot"
+        android:contentDescription="" />
+
+    <TextView
+        android:id="@+id/widget_item_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:textColor="@color/widget_text_primary"
+        android:textSize="13sp"
+        android:maxLines="1"
+        android:ellipsize="end" />
+
+    <TextView
+        android:id="@+id/widget_item_due"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@color/widget_text_secondary"
+        android:textSize="11sp"
+        android:layout_marginStart="8dp"
+        android:maxLines="1"
+        android:visibility="gone" />
+
+</LinearLayout>

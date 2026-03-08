@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    widget_btn_bg_purple.xml
+    ─────────────────────────────────────────────────────────────────────────
+    Rounded-square background for the calendar button on the widget header.
+    Matches the app's Purple (#7C3AED) used for the calendar FilledIconButton
+    in AddTaskItem.kt (containerColor = Purple).
+
+    Place at: app/src/main/res/drawable/widget_btn_bg_purple.xml
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#7C3AED" />
+    <corners android:radius="10dp" />
+</shape>

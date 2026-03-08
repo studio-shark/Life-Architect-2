@@ -63,6 +63,10 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.androidx.material.icons.extended)
 
+    // Jetpack Glance (Home Screen Widget)
+    implementation("androidx.glance:glance-appwidget:1.1.1")
+    implementation("androidx.glance:glance-material3:1.1.1")
+
     // Charting Library (Maven Central) — 0.0.19 is the last version compiled with Kotlin 2.0.x
     implementation("io.github.ehsannarmani:compose-charts:0.0.19")
 

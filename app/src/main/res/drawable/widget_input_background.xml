@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    widget_input_background.xml
+    ─────────────────────────────────────────────────────────────────────────
+    Rounded rectangle background for EditText fields and tappable labels
+    inside the widget add-task and add-event dialogs.
+
+    Place at: app/src/main/res/drawable/widget_input_background.xml
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+
+    <solid android:color="#2A2A3E" />
+    <corners android:radius="8dp" />
+    <stroke
+        android:width="1dp"
+        android:color="#33FFFFFF" />
+
+</shape>

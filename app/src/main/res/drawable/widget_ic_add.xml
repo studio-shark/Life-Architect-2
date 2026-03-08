@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    widget_ic_add.xml
+    ─────────────────────────────────────────────────────────────────────────
+    Simple "+" icon for the Add Task button in the widget header.
+    Tinted purple (#7C3AED) via android:tint in widget_task_list.xml.
+
+    Place at: app/src/main/res/drawable/widget_ic_add.xml
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" />
+
+</vector>

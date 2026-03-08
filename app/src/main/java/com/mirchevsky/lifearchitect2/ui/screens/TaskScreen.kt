@@ -10,17 +10,15 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mirchevsky.lifearchitect2.ui.composables.AddTaskItem
@@ -35,9 +33,8 @@ import kotlinx.coroutines.delay
  * This means the [LazyColumn] physically stops where [AddTaskItem] begins — no
  * items can ever be hidden behind the card, no manual height math needed.
  *
- * [windowInsetsPadding] on the root Column handles both the nav-bar inset (when
- * keyboard is closed) and the IME inset (when keyboard is open) in one smooth
- * animated modifier — no manual pixel-to-dp conversion required.
+ * [statusBarsPadding] on the root Column pushes content below the Android status bar.
+ * [imePadding] handles the keyboard inset smoothly when the user is typing.
  *
  * A [delay] of 100 ms before [animateScrollToItem] gives the layout engine time
  * to begin its resize animation so the scroll targets the correct final offset.
@@ -83,6 +80,8 @@ fun TasksScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // Push content below the Android status bar
+            .statusBarsPadding()
             // Smoothly follows keyboard edge when open; clears nav bar when closed
             .imePadding()
     ) {
@@ -94,18 +93,8 @@ fun TasksScreen(
                 .weight(1f)  // fills all space above AddTaskItem; shrinks when keyboard opens
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(top = 0.dp, bottom = 8.dp)
+            contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp)
         ) {
-            item {
-                Text(
-                    text = "Tasks",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 8.dp)
-                )
-            }
-
             items(sortedTasks, key = { it.id }) { task ->
                 TaskItem(
                     task = task,

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    activity_widget_add_task.xml
+    ─────────────────────────────────────────────────────────────────────────
+    Layout for the "Add Task" dialog launched from the widget header button.
+    Appears as a floating dialog over the home screen.
+
+    Place at: app/src/main/res/layout/activity_widget_add_task.xml
+-->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#1C1C2E"
+    android:padding="24dp">
+
+    <!-- ── Dialog title ───────────────────────────────────────────────────── -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="New Task"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:fontFamily="sans-serif-medium"
+        android:layout_marginBottom="16dp" />
+
+    <!-- ── Task title input ───────────────────────────────────────────────── -->
+    <EditText
+        android:id="@+id/widget_add_task_input"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Task title"
+        android:textColorHint="#66FFFFFF"
+        android:textColor="#FFFFFF"
+        android:textSize="15sp"
+        android:background="@drawable/widget_input_background"
+        android:padding="12dp"
+        android:inputType="textCapSentences|textAutoCorrect"
+        android:imeOptions="actionDone"
+        android:maxLines="3"
+        android:layout_marginBottom="20dp" />
+
+    <!-- ── Action buttons ────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end">
+
+        <Button
+            android:id="@+id/widget_add_task_cancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Cancel"
+            android:textColor="#99FFFFFF"
+            android:background="@android:color/transparent"
+            android:textSize="14sp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/widget_add_task_save"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Save"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#7C3AED"
+            android:textSize="14sp"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp" />
+
+    </LinearLayout>
+
+</LinearLayout>

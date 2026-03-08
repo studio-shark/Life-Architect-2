@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:name=".LifeArchitectApplication"
@@ -34,6 +37,118 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- ══════════════════════════════════════════════════════════════════
+             WIDGET COMPONENTS
+             ══════════════════════════════════════════════════════════════════ -->
+
+        <!--
+            TaskWidgetProvider — the BroadcastReceiver that orchestrates the
+            task list home screen widget.
+
+            ACTION_WIDGET_REFRESH is sent by WidgetOverlayService after saving
+            a task, so the widget list updates immediately.
+
+            ACTION_COMPLETE_TASK is sent when the user taps a task row on the
+            widget; the provider marks it done in Room and refreshes the list.
+        -->
+        <receiver
+            android:name=".widget.TaskWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.mirchevsky.lifearchitect2.WIDGET_REFRESH" />
+                <action android:name="com.mirchevsky.lifearchitect2.COMPLETE_TASK" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/task_widget_info" />
+        </receiver>
+
+        <!--
+            TaskWidgetService — the RemoteViewsService that supplies row views
+            to the widget's ListView.
+
+            android:permission="android.permission.BIND_REMOTEVIEWS" prevents
+            other apps from binding to this service and reading task data.
+        -->
+        <service
+            android:name=".widget.TaskWidgetService"
+            android:exported="true"
+            android:permission="android.permission.BIND_REMOTEVIEWS">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+        </service>
+
+        <!--
+            WidgetOverlayService — ForegroundService that draws the slide-up
+            Compose input panel via WindowManager + TYPE_APPLICATION_OVERLAY.
+
+            Started by the widget's +, mic, and calendar PendingIntents.
+            Requires SYSTEM_ALERT_WINDOW permission (user grants once via
+            Settings). Uses foregroundServiceType="specialUse" as required
+            by Android 14+ for overlay-drawing foreground services.
+        -->
+        <service
+            android:name=".widget.WidgetOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="overlay_input" />
+        </service>
+
+        <!--
+            The three old dialog activities below are superseded by
+            WidgetOverlayService but are kept here so the build does not break
+            if any existing code still references them. They can be removed
+            once you have verified the overlay service works end-to-end.
+        -->
+        <activity
+            android:name=".widget.WidgetAddTaskActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LifeArchitect2.WidgetDialog"
+            android:excludeFromRecents="true"
+            android:windowSoftInputMode="stateVisible|adjustResize" />
+
+        <activity
+            android:name=".widget.WidgetAddEventActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LifeArchitect2.WidgetDialog"
+            android:excludeFromRecents="true"
+            android:windowSoftInputMode="stateVisible|adjustResize" />
+
+        <activity
+            android:name=".widget.WidgetVoiceActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LifeArchitect2.WidgetDialog"
+            android:excludeFromRecents="true" />
+
+        <!--
+            MicPermissionActivity — transparent trampoline Activity that
+            requests RECORD_AUDIO on behalf of WidgetOverlayService.
+            Services cannot call requestPermissions() directly, so this
+            zero-UI Activity is launched on the first mic tap.
+        -->
+        <activity
+            android:name=".widget.MicPermissionActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true" />
+
+        <!--
+            OverlayPermissionDialogActivity — transparent trampoline Activity
+            that shows a friendly in-app dialog explaining the overlay permission
+            before deep-linking the user to the app's own toggle in Settings.
+            Launched by WidgetOverlayService when canDrawOverlays() is false.
+        -->
+        <activity
+            android:name=".widget.OverlayPermissionDialogActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true" />
+
     </application>
 
 </manifest>

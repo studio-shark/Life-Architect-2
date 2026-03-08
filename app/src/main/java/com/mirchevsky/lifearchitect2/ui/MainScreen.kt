@@ -9,12 +9,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +45,9 @@ import com.mirchevsky.lifearchitect2.ui.viewmodel.MainViewModel
  *
  * Sets up the bottom navigation bar and the [NavHost] that hosts all screens.
  * The centre tab is a shortcut that navigates to Tasks and focuses the add-task field.
+ *
+ * Tab order (left → right): Analytics | Trending | + | History | Tasks (Home)
+ * Tasks is the rightmost tab for maximum right-hand thumb accessibility.
  *
  * The [NavigationBar] is hidden via [AnimatedVisibility] when the IME (keyboard) is
  * visible — this is the WhatsApp-style behaviour where the nav bar disappears when
@@ -79,19 +82,19 @@ fun MainScreen(viewModel: MainViewModel) {
                         val navBackStackEntry by navController.currentBackStackEntryAsState()
                         val currentDestination = navBackStackEntry?.destination
 
-                        // Tasks tab
+                        // Analytics tab (far left)
                         NavigationBarItem(
                             icon = {
                                 Icon(
-                                    imageVector = Screen.Tasks.icon,
-                                    contentDescription = Screen.Tasks.label,
+                                    imageVector = Screen.Analytics.icon,
+                                    contentDescription = Screen.Analytics.label,
                                     modifier = Modifier.size(26.dp)
                                 )
                             },
                             label = null,
-                            selected = currentDestination?.hierarchy?.any { it.route == Screen.Tasks.route } == true,
+                            selected = currentDestination?.hierarchy?.any { it.route == Screen.Analytics.route } == true,
                             onClick = {
-                                navController.navigate(Screen.Tasks.route) {
+                                navController.navigate(Screen.Analytics.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
@@ -99,19 +102,19 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         )
 
-                        // History tab
+                        // Trending tab
                         NavigationBarItem(
                             icon = {
                                 Icon(
-                                    imageVector = Screen.History.icon,
-                                    contentDescription = Screen.History.label,
+                                    imageVector = Screen.Trending.icon,
+                                    contentDescription = Screen.Trending.label,
                                     modifier = Modifier.size(26.dp)
                                 )
                             },
                             label = null,
-                            selected = currentDestination?.hierarchy?.any { it.route == Screen.History.route } == true,
+                            selected = currentDestination?.hierarchy?.any { it.route == Screen.Trending.route } == true,
                             onClick = {
-                                navController.navigate(Screen.History.route) {
+                                navController.navigate(Screen.Trending.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
@@ -140,19 +143,19 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         )
 
-                        // Trending tab
+                        // History tab
                         NavigationBarItem(
                             icon = {
                                 Icon(
-                                    imageVector = Screen.Trending.icon,
-                                    contentDescription = Screen.Trending.label,
+                                    imageVector = Screen.History.icon,
+                                    contentDescription = Screen.History.label,
                                     modifier = Modifier.size(26.dp)
                                 )
                             },
                             label = null,
-                            selected = currentDestination?.hierarchy?.any { it.route == Screen.Trending.route } == true,
+                            selected = currentDestination?.hierarchy?.any { it.route == Screen.History.route } == true,
                             onClick = {
-                                navController.navigate(Screen.Trending.route) {
+                                navController.navigate(Screen.History.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
@@ -160,19 +163,19 @@ fun MainScreen(viewModel: MainViewModel) {
                             }
                         )
 
-                        // Analytics tab
+                        // Tasks tab (far right — home icon, most accessible for right-handed users)
                         NavigationBarItem(
                             icon = {
                                 Icon(
-                                    imageVector = Screen.Analytics.icon,
-                                    contentDescription = Screen.Analytics.label,
+                                    imageVector = Icons.Default.Home,
+                                    contentDescription = Screen.Tasks.label,
                                     modifier = Modifier.size(26.dp)
                                 )
                             },
                             label = null,
-                            selected = currentDestination?.hierarchy?.any { it.route == Screen.Analytics.route } == true,
+                            selected = currentDestination?.hierarchy?.any { it.route == Screen.Tasks.route } == true,
                             onClick = {
-                                navController.navigate(Screen.Analytics.route) {
+                                navController.navigate(Screen.Tasks.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true

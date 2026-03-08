@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    widget_btn_bg_green.xml
+    ─────────────────────────────────────────────────────────────────────────
+    Rounded-square background for the add (+) button on the widget header.
+    Matches the app's BrandGreen (#10B981) used for the add FilledIconButton
+    in AddTaskItem.kt (containerColor = BrandGreen).
+
+    Note: in the app both the mic and add buttons use BrandGreen. The visual
+    difference seen in the screenshot is due to the icon contrast — the mic
+    icon is slightly lighter visually. Both backgrounds are the same colour.
+
+    Place at: app/src/main/res/drawable/widget_btn_bg_green.xml
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#10B981" />
+    <corners android:radius="10dp" />
+</shape>

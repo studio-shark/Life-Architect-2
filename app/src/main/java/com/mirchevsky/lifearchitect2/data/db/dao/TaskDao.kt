@@ -49,6 +49,22 @@ interface TaskDao {
     fun observeCompletedTasksForUser(userId: String): Flow<List<TaskEntity>>
 
     /**
+     * One-shot (non-Flow) query for all pending tasks for a specific user.
+     *
+     * Used by [TaskWidgetItemFactory] inside [RemoteViewsFactory.onDataSetChanged],
+     * which runs on a background thread managed by the AppWidgetService framework.
+     * A direct suspend query is faster than [observePendingTasksForUser] because it
+     * avoids Flow collection overhead and returns immediately once the cursor is
+     * exhausted — preventing the framework's loading-view timeout from firing and
+     * leaving the widget stuck on "Loading…" rows.
+     *
+     * @param userId The ID of the user whose pending tasks are to be fetched.
+     * @return A list of pending [TaskEntity] for the user.
+     */
+    @Query("SELECT * FROM tasks WHERE user_id = :userId AND is_completed = 0 ORDER BY created_at DESC")
+    suspend fun getPendingTasksForUser(userId: String): List<TaskEntity>
+
+    /**
      * Deletes a specific task by its ID.
      *
      * @param taskId The ID of the task to delete.

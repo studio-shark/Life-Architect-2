@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    colors_widget.xml  (values-night = dark mode)
+    ─────────────────────────────────────────────────────────────────────────
+    Widget colour tokens for DARK mode.
+    The light-mode defaults live in res/values/colors_widget.xml.
+
+    Place at: app/src/main/res/values-night/colors_widget.xml
+-->
+<resources>
+    <!-- Widget card background — deep navy in dark mode -->
+    <color name="widget_background">#1C1C2E</color>
+
+    <!-- Primary text — white in dark mode -->
+    <color name="widget_text_primary">#FFFFFF</color>
+
+    <!-- Secondary text — muted white -->
+    <color name="widget_text_secondary">#99FFFFFF</color>
+
+    <!-- Divider line — subtle white -->
+    <color name="widget_divider">#33FFFFFF</color>
+</resources>

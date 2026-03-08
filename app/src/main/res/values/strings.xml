@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Life Architect 2</string>
+    <string name="widget_description">Life Architect task list widget</string>
 </resources>

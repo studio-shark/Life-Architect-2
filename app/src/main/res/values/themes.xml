@@ -2,4 +2,21 @@
 <resources>
 
     <style name="Theme.LifeArchitect2" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+        Theme for the widget's add-task and add-event dialog activities.
+        Inherits from the standard Android Material dark dialog theme — no
+        AppCompat dependency required.
+        The windowBackground is overridden to transparent so the activity's
+        own dark card layout (widget_background drawable) is fully visible.
+    -->
+    <style name="Theme.LifeArchitect2.WidgetDialog" parent="android:Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.6</item>
+        <item name="android:windowMinWidthMajor">80%</item>
+        <item name="android:windowMinWidthMinor">80%</item>
+    </style>
+
 </resources>

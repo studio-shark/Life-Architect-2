@@ -51,7 +51,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        // Tell the window that WE handle system-bar insets (Compose will apply them)
+        // Tell the window that WE handle system-bar insets (Compose will apply them).
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         // --- AdMob: Request consent and initialize SDK ---

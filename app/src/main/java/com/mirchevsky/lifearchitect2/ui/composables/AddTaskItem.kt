@@ -80,6 +80,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import com.mirchevsky.lifearchitect2.permissions.PermissionGateState
+import com.mirchevsky.lifearchitect2.permissions.PermissionPrefs
+import com.mirchevsky.lifearchitect2.permissions.openAppPermissionSettings
+import com.mirchevsky.lifearchitect2.permissions.resolvePermissionGateState
 import com.mirchevsky.lifearchitect2.ui.theme.BrandGreen
 import com.mirchevsky.lifearchitect2.ui.theme.Purple
 import com.mirchevsky.lifearchitect2.utils.DateIntentParser
@@ -136,6 +142,22 @@ fun AddTaskItem(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val focusRequester = remember { FocusRequester() }
+    val permissionPrefs = remember(context) { PermissionPrefs(context) }
+
+    // Permission gate states — re-resolved on each composition so they update
+    // immediately after the user returns from the system dialog.
+    var micPermState by remember {
+        mutableStateOf(resolvePermissionGateState(context, Manifest.permission.RECORD_AUDIO, permissionPrefs))
+    }
+    var calPermState by remember {
+        mutableStateOf(resolvePermissionGateState(context, Manifest.permission.WRITE_CALENDAR, permissionPrefs))
+    }
+
+    // In-app rationale / blocked dialogs
+    var showMicRationale by remember { mutableStateOf(false) }
+    var showMicBlocked by remember { mutableStateOf(false) }
+    var showCalRationale by remember { mutableStateOf(false) }
+    var showCalBlocked by remember { mutableStateOf(false) }
 
     var title by remember { mutableStateOf("") }
     var parseResult by remember { mutableStateOf<DateIntentParser.ParseResult?>(null) }
@@ -206,35 +228,45 @@ fun AddTaskItem(
         }
     }
 
-    // ── Permission launchers ───────────────────────────────────────────────
+    // ── Permission launchers (gate-aware) ────────────────────────────────────
 
     var pendingCalendarAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
+        calPermState = resolvePermissionGateState(context, Manifest.permission.WRITE_CALENDAR, permissionPrefs)
         if (results[Manifest.permission.WRITE_CALENDAR] == true) {
             pendingCalendarAction?.invoke()
+            pendingCalendarAction = null
+        } else {
+            pendingCalendarAction = null
+            when (calPermState) {
+                PermissionGateState.RequestableWithRationale -> showCalRationale = true
+                PermissionGateState.PermanentlyDenied        -> showCalBlocked = true
+                else -> Unit
+            }
         }
-        pendingCalendarAction = null
     }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
+        micPermState = resolvePermissionGateState(context, Manifest.permission.RECORD_AUDIO, permissionPrefs)
         if (granted) {
             speechRecognizer.setRecognitionListener(recognitionListener)
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                )
-                // No EXTRA_LANGUAGE — uses device default language automatically
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             }
             speechRecognizer.startListening(intent)
         } else {
-            Log.w(TAG, "RECORD_AUDIO permission denied")
+            Log.w(TAG, "RECORD_AUDIO denied — state=$micPermState")
+            when (micPermState) {
+                PermissionGateState.RequestableWithRationale -> showMicRationale = true
+                PermissionGateState.PermanentlyDenied        -> showMicBlocked = true
+                else -> Unit
+            }
         }
     }
 
@@ -382,44 +414,47 @@ fun AddTaskItem(
      */
     fun startListening() {
         if (isMicActive) {
-            // Second tap cancels listening
             speechRecognizer.stopListening()
             isMicActive = false
             return
         }
-        val hasAudio = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (!hasAudio) {
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            return
+        // Re-resolve state on every tap so it reflects any changes since last tap
+        micPermState = resolvePermissionGateState(context, Manifest.permission.RECORD_AUDIO, permissionPrefs)
+        when (micPermState) {
+            PermissionGateState.Granted -> {
+                speechRecognizer.setRecognitionListener(recognitionListener)
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                }
+                speechRecognizer.startListening(intent)
+            }
+            PermissionGateState.RequestableFirstTime,
+            PermissionGateState.RequestableWithRationale -> {
+                permissionPrefs.markRequested(Manifest.permission.RECORD_AUDIO)
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+            PermissionGateState.PermanentlyDenied -> showMicBlocked = true
         }
-        speechRecognizer.setRecognitionListener(recognitionListener)
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
-            // No EXTRA_LANGUAGE — device default language is used automatically
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        }
-        speechRecognizer.startListening(intent)
     }
 
     /** Opens the date picker, requesting calendar permissions if needed. */
     fun openCalendarPicker() {
         if (!hasText) return
-        val hasWrite = context.checkSelfPermission(Manifest.permission.WRITE_CALENDAR) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-        val hasRead = context.checkSelfPermission(Manifest.permission.READ_CALENDAR) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (hasWrite && hasRead) {
-            showDatePicker = true
-        } else {
-            pendingCalendarAction = { showDatePicker = true }
-            calendarPermissionLauncher.launch(
-                arrayOf(Manifest.permission.WRITE_CALENDAR, Manifest.permission.READ_CALENDAR)
-            )
+        // Re-resolve state on every tap
+        calPermState = resolvePermissionGateState(context, Manifest.permission.WRITE_CALENDAR, permissionPrefs)
+        when (calPermState) {
+            PermissionGateState.Granted -> showDatePicker = true
+            PermissionGateState.RequestableFirstTime,
+            PermissionGateState.RequestableWithRationale -> {
+                permissionPrefs.markRequested(Manifest.permission.WRITE_CALENDAR)
+                pendingCalendarAction = { showDatePicker = true }
+                calendarPermissionLauncher.launch(
+                    arrayOf(Manifest.permission.WRITE_CALENDAR, Manifest.permission.READ_CALENDAR)
+                )
+            }
+            PermissionGateState.PermanentlyDenied -> showCalBlocked = true
         }
     }
 
@@ -558,6 +593,88 @@ fun AddTaskItem(
         }
 
     } // end Box
+
+    // ── Permission rationale dialogs ──────────────────────────────────────────
+    // Shown after the first denial to explain why the permission is needed.
+
+    if (showMicRationale) {
+        AlertDialog(
+            onDismissRequest = { showMicRationale = false },
+            title = { Text("Microphone access needed") },
+            text  = { Text("Life Architect needs the microphone to transcribe your voice into a task title. Tap \"Allow\" to grant access.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showMicRationale = false
+                    permissionPrefs.markRequested(Manifest.permission.RECORD_AUDIO)
+                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }) { Text("Allow") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMicRationale = false }) { Text("Not now") }
+            }
+        )
+    }
+
+    if (showMicBlocked) {
+        AlertDialog(
+            onDismissRequest = { showMicBlocked = false },
+            title = { Text("Microphone access blocked") },
+            text  = { Text("You have permanently denied microphone access. To use voice input, open Settings → Permissions → Microphone and enable it.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showMicBlocked = false
+                        openAppPermissionSettings(context)
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                ) { Text("Open Settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMicBlocked = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showCalRationale) {
+        AlertDialog(
+            onDismissRequest = { showCalRationale = false },
+            title = { Text("Calendar access needed") },
+            text  = { Text("Life Architect needs calendar access to add your task as a calendar event. Tap \"Allow\" to grant access.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCalRationale = false
+                    permissionPrefs.markRequested(Manifest.permission.WRITE_CALENDAR)
+                    pendingCalendarAction = { showDatePicker = true }
+                    calendarPermissionLauncher.launch(
+                        arrayOf(Manifest.permission.WRITE_CALENDAR, Manifest.permission.READ_CALENDAR)
+                    )
+                }) { Text("Allow") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCalRationale = false }) { Text("Not now") }
+            }
+        )
+    }
+
+    if (showCalBlocked) {
+        AlertDialog(
+            onDismissRequest = { showCalBlocked = false },
+            title = { Text("Calendar access blocked") },
+            text  = { Text("You have permanently denied calendar access. To add events, open Settings → Permissions → Calendar and enable it.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showCalBlocked = false
+                        openAppPermissionSettings(context)
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                ) { Text("Open Settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCalBlocked = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     // ── Date picker dialog (step 1 of 2) ──────────────────────────────────
 

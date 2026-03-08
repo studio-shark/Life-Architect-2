@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    widget_dot.xml
+    ─────────────────────────────────────────────────────────────────────────
+    Small circle used as the status indicator dot in each task row.
+    The fill colour is overridden at runtime by TaskWidgetItemFactory
+    using RemoteViews.setInt(id, "setColorFilter", colour).
+
+    Default colour is a subtle white — overridden for urgent (red) and
+    pinned (amber) tasks.
+
+    Place at: app/src/main/res/drawable/widget_dot.xml
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+
+    <solid android:color="#33FFFFFF" />
+
+</shape>

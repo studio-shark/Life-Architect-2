@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    widget_task_list.xml
+    ─────────────────────────────────────────────────────────────────────────
+    Main frame layout for the Life Architect 2 task list home screen widget.
+
+    Structure:
+      ┌─────────────────────────────────────────────┐
+      │  Tasks               [mic]  [cal]  [+]      │  ← header row
+      │─────────────────────────────────────────────│  ← divider
+      │  • Task title              Mar 29, 22:00    │
+      │  • Task title                               │  ← ListView rows
+      │  • Task title              Mar 24, 09:00    │
+      │    …                                        │
+      └─────────────────────────────────────────────┘
+
+    Button order matches AddTaskItem.kt: Mic → Calendar → Add (left to right).
+
+    Colours use @color/widget_* references that resolve to light or dark
+    variants automatically based on the system night-mode setting:
+      res/values/colors_widget.xml       (light mode defaults)
+      res/values-night/colors_widget.xml (dark mode overrides)
+
+    Place at: app/src/main/res/layout/widget_task_list.xml
+-->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_background"
+    android:padding="12dp">
+
+    <!-- ── Header row ──────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="8dp">
+
+        <!-- Widget title -->
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Tasks"
+            android:textColor="@color/widget_text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <!--
+            Mic button (order 1) — teal rounded square, white icon.
+            Matches app's FilledIconButton with BrandGreen (#10B981) background.
+        -->
+        <ImageButton
+            android:id="@+id/widget_btn_mic"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/widget_btn_bg_teal"
+            android:src="@drawable/widget_ic_mic"
+            android:contentDescription="Voice input"
+            android:scaleType="centerInside"
+            android:padding="7dp" />
+
+        <!--
+            Calendar button (order 2) — purple rounded square, white icon.
+            Matches app's FilledIconButton with Purple (#7C3AED) background.
+        -->
+        <ImageButton
+            android:id="@+id/widget_btn_add_event"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/widget_btn_bg_purple"
+            android:src="@drawable/widget_ic_calendar"
+            android:contentDescription="Add calendar event"
+            android:scaleType="centerInside"
+            android:padding="7dp"
+            android:layout_marginStart="5dp" />
+
+        <!--
+            Add Task button (order 3) — green rounded square, white icon.
+            Matches app's FilledIconButton with BrandGreen (#10B981) background.
+        -->
+        <ImageButton
+            android:id="@+id/widget_btn_add_task"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/widget_btn_bg_green"
+            android:src="@drawable/widget_ic_add"
+            android:contentDescription="Add task"
+            android:scaleType="centerInside"
+            android:padding="7dp"
+            android:layout_marginStart="5dp" />
+
+    </LinearLayout>
+
+    <!-- ── Divider ─────────────────────────────────────────────────────── -->
+    <!-- Note: plain android.view.View is not on the RemoteViews allowlist in
+         API 31+. Use TextView with empty text as a safe divider instead. -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/widget_divider"
+        android:layout_marginBottom="4dp"
+        android:text="" />
+
+    <!-- ── Task list (populated by TaskWidgetService / RemoteViewsFactory) -->
+    <ListView
+        android:id="@+id/widget_task_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@null"
+        android:dividerHeight="0dp"
+        android:scrollbars="none"
+        android:overScrollMode="never" />
+
+    <!-- ── Empty state (shown automatically when ListView has no items) ── -->
+    <TextView
+        android:id="@+id/widget_empty_text"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="No pending tasks"
+        android:textColor="@color/widget_text_secondary"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+</LinearLayout>
