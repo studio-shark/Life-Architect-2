@@ -11,14 +11,16 @@ import com.mirchevsky.lifearchitect2.data.db.AppDatabase
 import com.mirchevsky.lifearchitect2.data.db.entity.TaskEntity
 import kotlinx.coroutines.runBlocking
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /**
  * TaskWidgetItemFactory
  * ─────────────────────────────────────────────────────────────────────────────
  * RemoteViewsFactory that populates the widget's ListView with pending tasks
- * from Room.
+ * (and calendar events) from Room.
  *
  * Key design notes:
  *
@@ -44,6 +46,16 @@ import java.time.format.DateTimeFormatter
  *    [onDataSetChanged] is always called on a background thread by the framework;
  *    blocking that thread while Room returns data is the correct pattern.
  *
+ * 4. **Event rows (status == "event").**
+ *    Calendar events created from the widget are stored as TaskEntity rows with
+ *    status = "event". They are rendered with:
+ *    - The event title (no emoji prefix).
+ *    - A date chip below the title showing the smart-formatted date:
+ *        "Today, 13:37"  /  "Tomorrow, 09:30"  /  "Feb 14, 09:30"
+ *        "Today"  /  "Tomorrow"  /  "Feb 14"   (all-day, stored at UTC midnight)
+ *    - A calendar icon (widget_ic_calendar) next to the date chip.
+ *    - Flag and pin icons are always shown (same as regular tasks).
+ *
  * Place at:
  *   app/src/main/java/com/mirchevsky/lifearchitect2/widget/TaskWidgetItemFactory.kt
  */
@@ -54,14 +66,12 @@ class TaskWidgetItemFactory(
 
     private var tasks: List<TaskEntity> = emptyList()
 
-    private val dueDateFormatter: DateTimeFormatter =
-        DateTimeFormatter.ofPattern("MMM d, HH:mm")
-
     // Colours applied via RemoteViews.setInt(id, "setColorFilter", color)
     // and RemoteViews.setTextColor(id, color).
-    private val colorUrgent  = Color.parseColor("#E53935")  // red
-    private val colorPinned  = Color.parseColor("#F59E0B")  // amber
+    private val colorUrgent  = Color.parseColor("#E53935")   // red
+    private val colorPinned  = Color.parseColor("#F59E0B")   // amber
     private val colorDefault = Color.parseColor("#80FFFFFF") // muted white (dark mode)
+    private val colorPurple  = Color.parseColor("#7C3AED")   // app purple (calendar icon tint)
 
     // ── Factory lifecycle ─────────────────────────────────────────────────────
 
@@ -89,36 +99,32 @@ class TaskWidgetItemFactory(
     override fun getViewAt(position: Int): RemoteViews {
         if (position >= tasks.size) return buildLoadingView()
         val task = tasks[position]
+        val isEvent = task.status == "event"
+
         val rv = RemoteViews(context.packageName, R.layout.widget_task_item)
 
         // ── Title ─────────────────────────────────────────────────────────────
         rv.setTextViewText(R.id.widget_item_title, task.title)
 
-        // ── Title text colour + flag/pin icon visibility ───────────────────────
-        when {
-            task.isUrgent -> {
-                // Red text, red flag visible, pin hidden
-                rv.setTextColor(R.id.widget_item_title, colorUrgent)
-                rv.setViewVisibility(R.id.widget_item_flag, View.VISIBLE)
-                rv.setInt(R.id.widget_item_flag, "setColorFilter", colorUrgent)
-                rv.setViewVisibility(R.id.widget_item_pin, View.GONE)
-            }
-            task.isPinned -> {
-                // Amber text, pin visible, flag hidden
-                rv.setTextColor(R.id.widget_item_title, colorPinned)
-                rv.setViewVisibility(R.id.widget_item_pin, View.VISIBLE)
-                rv.setInt(R.id.widget_item_pin, "setColorFilter", colorPinned)
-                rv.setViewVisibility(R.id.widget_item_flag, View.GONE)
-            }
-            else -> {
-                // Default text colour, both icons hidden
-                rv.setTextColor(R.id.widget_item_title, Color.parseColor("#EEEEEE"))
-                rv.setViewVisibility(R.id.widget_item_flag, View.GONE)
-                rv.setViewVisibility(R.id.widget_item_pin, View.GONE)
-            }
+        // ── Title text colour ─────────────────────────────────────────────────
+        val titleColor = when {
+            task.isUrgent -> colorUrgent
+            task.isPinned -> colorPinned
+            else          -> Color.parseColor("#EEEEEE")
         }
+        rv.setTextColor(R.id.widget_item_title, titleColor)
 
-        // ── Checkbox tint ─────────────────────────────────────────────────────
+        // ── Flag icon (always visible; red when urgent, muted otherwise) ──────
+        rv.setViewVisibility(R.id.widget_item_flag, View.VISIBLE)
+        val flagColor = if (task.isUrgent) colorUrgent else colorDefault
+        rv.setInt(R.id.widget_item_flag, "setColorFilter", flagColor)
+
+        // ── Pin icon (always visible; amber when pinned, muted otherwise) ─────
+        rv.setViewVisibility(R.id.widget_item_pin, View.VISIBLE)
+        val pinColor = if (task.isPinned) colorPinned else colorDefault
+        rv.setInt(R.id.widget_item_pin, "setColorFilter", pinColor)
+
+        // ── Checkbox / dot tint ───────────────────────────────────────────────
         val dotColor = when {
             task.isUrgent -> colorUrgent
             task.isPinned -> colorPinned
@@ -126,16 +132,22 @@ class TaskWidgetItemFactory(
         }
         rv.setInt(R.id.widget_item_dot, "setColorFilter", dotColor)
 
-        // ── Due date ──────────────────────────────────────────────────────────
+        // ── Date chip (below title) ───────────────────────────────────────────
         val dueDate: Long? = task.dueDate
         if (dueDate != null) {
-            val formatted = Instant.ofEpochMilli(dueDate)
-                .atZone(ZoneId.systemDefault())
-                .format(dueDateFormatter)
+            val formatted = formatDueDate(dueDate)
             rv.setTextViewText(R.id.widget_item_due, formatted)
             rv.setViewVisibility(R.id.widget_item_due, View.VISIBLE)
         } else {
             rv.setViewVisibility(R.id.widget_item_due, View.GONE)
+        }
+
+        // ── Calendar icon (only for event rows) ───────────────────────────────
+        if (isEvent) {
+            rv.setViewVisibility(R.id.widget_item_calendar, View.VISIBLE)
+            rv.setInt(R.id.widget_item_calendar, "setColorFilter", colorPurple)
+        } else {
+            rv.setViewVisibility(R.id.widget_item_calendar, View.GONE)
         }
 
         // ── Fill-in intent: carries task ID to TaskWidgetProvider on tap ──────
@@ -165,8 +177,8 @@ class TaskWidgetItemFactory(
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /**
-     * Synchronously loads pending tasks from Room using a direct one-shot
-     * suspend query ([TaskDao.getPendingTasksForUser]).
+     * Synchronously loads pending tasks and calendar events from Room using a
+     * direct one-shot suspend query ([TaskDao.getPendingTasksForUser]).
      *
      * Ordered: pinned first, then urgent, then by creation date descending —
      * matching the in-app task list sort order.
@@ -182,6 +194,46 @@ class TaskWidgetItemFactory(
         }
     }
 
+    /**
+     * Formats a dueDate epoch millis value for display in the widget row.
+     *
+     * All-day detection: if the stored millis falls exactly on UTC midnight
+     * (hour == 0, minute == 0, second == 0 in UTC), the event was stored as
+     * all-day and only the date portion is shown.
+     *
+     * Relative labels:
+     *   - Today     → "Today" or "Today, HH:mm"
+     *   - Tomorrow  → "Tomorrow" or "Tomorrow, HH:mm"
+     *   - Yesterday → "Yesterday" or "Yesterday, HH:mm"
+     *   - Other     → "MMM d" or "MMM d, HH:mm"
+     */
+    private fun formatDueDate(epochMillis: Long): String {
+        val zoneId   = ZoneId.systemDefault()
+        val instant  = Instant.ofEpochMilli(epochMillis)
+        val zdt      = instant.atZone(zoneId)
+
+        // All-day detection: UTC midnight means the event was stored as all-day.
+        val utcZdt   = instant.atZone(ZoneOffset.UTC)
+        val isAllDay = utcZdt.hour == 0 && utcZdt.minute == 0 && utcZdt.second == 0
+
+        val today     = LocalDate.now(zoneId)
+        val eventDate = zdt.toLocalDate()
+
+        val dateLabel = when (eventDate) {
+            today            -> "Today"
+            today.plusDays(1) -> "Tomorrow"
+            today.minusDays(1) -> "Yesterday"
+            else -> eventDate.format(DateTimeFormatter.ofPattern("MMM d"))
+        }
+
+        return if (isAllDay) {
+            dateLabel
+        } else {
+            val timeLabel = zdt.format(DateTimeFormatter.ofPattern("HH:mm"))
+            "$dateLabel, $timeLabel"
+        }
+    }
+
     /** Builds a blank row view used as the loading placeholder. */
     private fun buildLoadingView(): RemoteViews =
         RemoteViews(context.packageName, R.layout.widget_task_item).also { rv ->
@@ -189,5 +241,6 @@ class TaskWidgetItemFactory(
             rv.setViewVisibility(R.id.widget_item_due, View.GONE)
             rv.setViewVisibility(R.id.widget_item_flag, View.GONE)
             rv.setViewVisibility(R.id.widget_item_pin, View.GONE)
+            rv.setViewVisibility(R.id.widget_item_calendar, View.GONE)
         }
 }

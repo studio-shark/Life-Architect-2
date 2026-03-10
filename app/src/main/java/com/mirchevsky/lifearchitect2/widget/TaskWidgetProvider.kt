@@ -16,6 +16,7 @@ import com.mirchevsky.lifearchitect2.data.db.entity.TaskEntity
 import kotlinx.coroutines.runBlocking
 import java.time.Instant
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /**
@@ -23,60 +24,61 @@ import java.time.format.DateTimeFormatter
  * ─────────────────────────────────────────────────────────────────────────────
  * AppWidgetProvider for the Life Architect task list widget.
  *
- * This implementation uses the modern [RemoteViews.RemoteCollectionItems] API
- * (API 31+) instead of the deprecated [android.widget.RemoteViewsService] /
- * [android.widget.RemoteViewsService.RemoteViewsFactory] pattern. All item
- * construction happens inline inside [pushWidget].
+ * Uses the modern [RemoteViews.RemoteCollectionItems] API (API 31+) instead of
+ * the deprecated [android.widget.RemoteViewsService] pattern.
  *
- * ## Why runBlocking instead of a coroutine scope?
+ * ## Interactive row actions
  *
- * [AppWidgetProvider.onReceive] and [onUpdate] run on the **main thread** and
- * return immediately. If we launch a coroutine on Dispatchers.IO and call
- * [AppWidgetManager.updateAppWidget] from inside it, the home screen receives
- * the RemoteViews **after** the provider has already returned — which works for
- * the outer RemoteViews frame, but the [RemoteViews.RemoteCollectionItems]
- * payload is evaluated synchronously by the launcher at the moment
- * [updateAppWidget] is called. Because the coroutine runs on a background
- * thread, the launcher may read the collection before Room has finished
- * populating it, resulting in rows that render with the correct count but
- * **blank text** (the view hierarchy is inflated but no setTextViewText calls
- * have been applied yet).
+ * Each row exposes three tap targets:
+ *   - [R.id.widget_item_dot]  → complete the task
+ *   - [R.id.widget_item_flag] → toggle urgent (isUrgent)
+ *   - [R.id.widget_item_pin]  → toggle pinned (isPinned)
  *
- * The fix is to call [pushWidget] from a background thread (via
- * [android.os.AsyncTask]-style dispatch or [goAsync]) and use **runBlocking**
- * inside it — exactly the same pattern that [TaskWidgetItemFactory.loadTasks]
- * used with [RemoteViewsFactory.onDataSetChanged]. This guarantees that Room
- * returns a fully-populated list before [buildCollectionItems] is called, and
- * that [updateAppWidget] is called only after the complete RemoteViews is ready.
+ * Because [RemoteViews.RemoteCollectionItems] only supports a single
+ * [RemoteViews.setPendingIntentTemplate] per list, all three actions share one
+ * template intent ([ACTION_WIDGET_ROW_ACTION]). Each fill-in intent carries:
+ *   - [EXTRA_TASK_ID]  — the task's string ID
+ *   - [EXTRA_ROW_ACTION] — one of [ROW_ACTION_COMPLETE], [ROW_ACTION_TOGGLE_FLAG],
+ *                          or [ROW_ACTION_TOGGLE_PIN]
  *
- * ## Refresh strategy
+ * [onReceive] dispatches on [EXTRA_ROW_ACTION] and performs the appropriate
+ * Room mutation on a background thread before pushing a fresh widget.
  *
- * Every data change (add, complete, revert, edit) sends a
- * [ACTION_WIDGET_REFRESH] broadcast. [onReceive] handles it by calling
- * [pushWidgetAsync] for every active widget ID. [pushWidgetAsync] calls
- * [goAsync] to extend the BroadcastReceiver deadline, then dispatches to a
- * background thread via [Thread] where [pushWidget] blocks on Room.
+ * ## Checkbox tint
  *
- * ## Task completion
+ * The checkbox ([R.id.widget_item_dot]) is NOT tinted by task state. Only the
+ * title text colour and the flag/pin icon tints change for urgent/pinned tasks.
+ * This prevents the coloured-box visual artefact seen when setColorFilter was
+ * applied to the checkbox ImageView.
  *
- * Each row carries a fill-in intent with the task ID. The provider intercepts
- * [ACTION_COMPLETE_TASK], marks the task done in Room on a background thread,
- * then immediately calls [pushWidget] to refresh the list.
+ * ## Threading
  *
- * Place at:
- *   app/src/main/java/com/mirchevsky/lifearchitect2/widget/TaskWidgetProvider.kt
+ * All Room access uses [runBlocking] on a background [Thread] started after
+ * [goAsync]. This guarantees the full task list is available before
+ * [AppWidgetManager.updateAppWidget] is called, preventing blank rows.
  */
 class TaskWidgetProvider : AppWidgetProvider() {
 
     companion object {
-        const val ACTION_WIDGET_REFRESH = "com.mirchevsky.lifearchitect2.WIDGET_REFRESH"
-        const val ACTION_COMPLETE_TASK  = "com.mirchevsky.lifearchitect2.COMPLETE_TASK"
-        const val EXTRA_TASK_ID         = "task_id"
+        // ── Broadcast actions ─────────────────────────────────────────────────
+        const val ACTION_WIDGET_REFRESH  = "com.mirchevsky.lifearchitect2.WIDGET_REFRESH"
+        const val ACTION_WIDGET_ROW_ACTION = "com.mirchevsky.lifearchitect2.WIDGET_ROW_ACTION"
 
-        // Colours for urgent / pinned / default rows
-        private val COLOR_URGENT  = Color.parseColor("#E53935")    // red
-        private val COLOR_PINNED  = Color.parseColor("#F59E0B")    // amber
-        private val COLOR_DEFAULT = Color.parseColor("#80FFFFFF")  // muted white (dark mode)
+        // ── Intent extras ─────────────────────────────────────────────────────
+        const val EXTRA_TASK_ID    = "task_id"
+        const val EXTRA_ROW_ACTION = "row_action"
+
+        // ── Row action discriminators ─────────────────────────────────────────
+        const val ROW_ACTION_COMPLETE     = "complete"
+        const val ROW_ACTION_TOGGLE_FLAG  = "toggle_flag"
+        const val ROW_ACTION_TOGGLE_PIN   = "toggle_pin"
+
+        // ── Colours ───────────────────────────────────────────────────────────
+        private val COLOR_URGENT  = Color.parseColor("#E53935")   // red
+        private val COLOR_PINNED  = Color.parseColor("#F59E0B")   // amber
+        // COLOR_ICON_INACTIVE is resolved at runtime via context.getColor(R.color.widget_icon_inactive)
+        // so it is theme-aware (dark grey on light backgrounds, muted white on dark backgrounds).
+        // It is NOT a compile-time constant — see buildTaskRow() for usage.
 
         private val DUE_DATE_FMT: DateTimeFormatter =
             DateTimeFormatter.ofPattern("MMM d, HH:mm")
@@ -121,9 +123,6 @@ class TaskWidgetProvider : AppWidgetProvider() {
         when (intent.action) {
 
             ACTION_WIDGET_REFRESH -> {
-                // Sent by MainViewModel (and WidgetOverlayService) after any
-                // task mutation. Rebuild and push the full widget for every
-                // active instance.
                 val manager = AppWidgetManager.getInstance(context)
                 val ids = manager.getAppWidgetIds(
                     ComponentName(context, TaskWidgetProvider::class.java)
@@ -131,30 +130,46 @@ class TaskWidgetProvider : AppWidgetProvider() {
                 ids.forEach { id -> pushWidgetAsync(context, manager, id) }
             }
 
-            ACTION_COMPLETE_TASK -> {
-                val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: return
-                // goAsync() extends the BroadcastReceiver deadline so the
-                // background thread has time to write to Room and push the
-                // updated widget without triggering an ANR.
+            ACTION_WIDGET_ROW_ACTION -> {
+                val taskId    = intent.getStringExtra(EXTRA_TASK_ID)    ?: return
+                val rowAction = intent.getStringExtra(EXTRA_ROW_ACTION) ?: return
+
                 val pendingResult = goAsync()
                 Thread {
                     try {
                         val dao = AppDatabase.getDatabase(context).taskDao()
-                        // Use the direct suspend query (same pattern as the old
-                        // TaskWidgetItemFactory) to avoid Flow type-inference issues.
-                        val task = runBlocking {
+
+                        val task: TaskEntity? = runBlocking {
                             dao.getPendingTasksForUser("local_user")
                         }.firstOrNull { it.id == taskId }
 
+                        var xpGained = 0
+
                         if (task != null) {
-                            runBlocking {
-                                dao.upsertTask(
+                            val updated = when (rowAction) {
+                                ROW_ACTION_COMPLETE -> {
+                                    xpGained = when (task.difficulty.lowercase()) {
+                                        "easy"   -> 10
+                                        "medium" -> 20
+                                        "hard"   -> 35
+                                        else     -> 15
+                                    }
                                     task.copy(
                                         isCompleted = true,
-                                        status = "completed",
+                                        status      = "completed",
                                         completedAt = System.currentTimeMillis()
                                     )
+                                }
+                                ROW_ACTION_TOGGLE_FLAG -> task.copy(
+                                    isUrgent = !task.isUrgent
                                 )
+                                ROW_ACTION_TOGGLE_PIN -> task.copy(
+                                    isPinned = !task.isPinned
+                                )
+                                else -> null
+                            }
+                            if (updated != null) {
+                                runBlocking { dao.upsertTask(updated) }
                             }
                         }
 
@@ -164,6 +179,17 @@ class TaskWidgetProvider : AppWidgetProvider() {
                             ComponentName(context, TaskWidgetProvider::class.java)
                         )
                         ids.forEach { id -> pushWidget(context, manager, id) }
+
+                        // Show XP popup overlay if a task was completed
+                        if (xpGained > 0) {
+                            context.startService(
+                                Intent(context, WidgetOverlayService::class.java).apply {
+                                    action = WidgetOverlayService.ACTION_SHOW_XP
+                                    putExtra(WidgetOverlayService.EXTRA_XP_AMOUNT, xpGained)
+                                    putExtra(WidgetOverlayService.EXTRA_XP_LABEL, "+$xpGained XP")
+                                }
+                            )
+                        }
                     } finally {
                         pendingResult.finish()
                     }
@@ -178,8 +204,6 @@ class TaskWidgetProvider : AppWidgetProvider() {
      * Dispatches [pushWidget] to a background thread via [goAsync], extending
      * the BroadcastReceiver deadline so Room can be queried without blocking
      * the main thread or risking an ANR.
-     *
-     * Called from [onUpdate] and [onReceive] (ACTION_WIDGET_REFRESH).
      */
     private fun pushWidgetAsync(
         context: Context,
@@ -197,16 +221,12 @@ class TaskWidgetProvider : AppWidgetProvider() {
     }
 
     /**
-     * Queries Room **synchronously** (via [runBlocking]) for the current pending
+     * Queries Room synchronously (via [runBlocking]) for the current pending
      * task list, builds a full [RemoteViews] including a
      * [RemoteViews.RemoteCollectionItems] for the task list, and pushes it to
      * the home screen via [AppWidgetManager.updateAppWidget].
      *
-     * **Must be called from a background thread.** Using [runBlocking] here is
-     * intentional and correct — it is the same pattern used by the old
-     * [TaskWidgetItemFactory.onDataSetChanged] with [kotlinx.coroutines.runBlocking].
-     * It guarantees that Room returns a fully-populated list before
-     * [buildCollectionItems] is called, so the launcher never sees blank rows.
+     * Must be called from a background thread.
      */
     private fun pushWidget(
         context: Context,
@@ -230,14 +250,18 @@ class TaskWidgetProvider : AppWidgetProvider() {
         rv.setRemoteAdapter(R.id.widget_task_list, items)
         rv.setEmptyView(R.id.widget_task_list, R.id.widget_empty_text)
 
-        // ── 3b. Task completion template intent ───────────────────────────────
-        val completionTemplate = PendingIntent.getBroadcast(
+        // ── 3b. Row action template intent ────────────────────────────────────
+        // All three per-row tap targets (checkbox, flag, pin) share this single
+        // template. The fill-in intent on each view adds EXTRA_TASK_ID and
+        // EXTRA_ROW_ACTION to discriminate between actions.
+        val rowActionTemplate = PendingIntent.getBroadcast(
             context,
             appWidgetId,
-            Intent(ACTION_COMPLETE_TASK).setClass(context, TaskWidgetProvider::class.java),
+            Intent(ACTION_WIDGET_ROW_ACTION)
+                .setClass(context, TaskWidgetProvider::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
-        rv.setPendingIntentTemplate(R.id.widget_task_list, completionTemplate)
+        rv.setPendingIntentTemplate(R.id.widget_task_list, rowActionTemplate)
 
         // ── 3c. Mic button ────────────────────────────────────────────────────
         rv.setOnClickPendingIntent(
@@ -261,32 +285,25 @@ class TaskWidgetProvider : AppWidgetProvider() {
         appWidgetManager.updateAppWidget(appWidgetId, rv)
     }
 
-    // ── Collection item builder ───────────────────────────────────────────────
+    // ── Collection building ───────────────────────────────────────────────────
 
-    /**
-     * Converts a list of [TaskEntity] objects into a
-     * [RemoteViews.RemoteCollectionItems] ready to be passed to
-     * [RemoteViews.setRemoteAdapter].
-     *
-     * Each item is a [RemoteViews] inflated from [R.layout.widget_task_item]
-     * with the same visual logic previously handled by [TaskWidgetItemFactory]:
-     *   - Urgent tasks: red title text + red flag icon
-     *   - Pinned tasks: amber title text + pin icon
-     *   - Normal tasks: default muted text, no icons
-     *   - Due date shown when present, hidden otherwise
-     *   - Fill-in intent carries the task ID for completion handling
-     */
     private fun buildCollectionItems(
         context: Context,
         tasks: List<TaskEntity>
     ): RemoteViews.RemoteCollectionItems {
+        // setViewTypeCount(3) with a 3-argument addItem() overload requires API 35.
+        // For pre-API-35 compatibility we instead use 3 separate layout resource IDs
+        // (widget_task_item, widget_task_item_urgent, widget_task_item_pinned).
+        // Because each layout has a different resource ID, the launcher's
+        // RemoteCollectionItems recycler treats them as different view types and
+        // maintains separate view caches — a pinned-row view is never handed to a
+        // normal or urgent row, so setTextColor is always applied to a fresh view.
         val builder = RemoteViews.RemoteCollectionItems.Builder()
             .setHasStableIds(true)
-            .setViewTypeCount(1)
+            .setViewTypeCount(3)
 
         tasks.forEach { task ->
             val itemRv = buildTaskRow(context, task)
-            // Use a stable long derived from the task's string ID
             val stableId = task.id.hashCode().toLong()
             builder.addItem(stableId, itemRv)
         }
@@ -295,73 +312,150 @@ class TaskWidgetProvider : AppWidgetProvider() {
     }
 
     /**
-     * Builds a single row [RemoteViews] for [task], matching the visual style
-     * of the in-app task list.
+     * Builds a single row [RemoteViews] for [task].
+     *
+     * Visual rules (mirror of in-app TaskItem):
+     *   - Title colour priority: urgent red > pinned amber > XML default
+     *   - Flag icon:  red if urgent, muted grey otherwise (independent of pin)
+     *   - Pin icon:   amber if pinned, muted grey otherwise (independent of flag)
+     *   - Both states can be active simultaneously — the icons are independent.
+     *
+     * Layout selection uses 4 distinct resource IDs so the launcher's
+     * RemoteCollectionItems recycler maintains a separate view cache per state
+     * combination. This prevents a tinted view from being recycled into a row
+     * with a different state.
+     *
+     * The checkbox ([R.id.widget_item_dot]) is NEVER tinted — it always renders
+     * with its XML default appearance to avoid the coloured-box artefact.
      */
     private fun buildTaskRow(context: Context, task: TaskEntity): RemoteViews {
-        val rv = RemoteViews(context.packageName, R.layout.widget_task_item)
+        // 4 layout variants — one per state combination — so the launcher's
+        // view recycler never hands a tinted view to a different-state row.
+        val layoutRes = when {
+            task.isUrgent && task.isPinned -> R.layout.widget_task_item_urgent_pinned
+            task.isUrgent                  -> R.layout.widget_task_item_urgent
+            task.isPinned                  -> R.layout.widget_task_item_pinned
+            else                           -> R.layout.widget_task_item
+        }
+        val rv = RemoteViews(context.packageName, layoutRes)
+
+        // Resolve theme-aware inactive icon tint at runtime.
+        // Light mode: dark at 40% opacity (#661C1C2E, matches checkbox stroke).
+        // Dark mode:  white at 40% opacity (#66FFFFFF).
+        val colorIconInactive = context.getColor(R.color.widget_icon_inactive)
 
         // ── Title ─────────────────────────────────────────────────────────────
         rv.setTextViewText(R.id.widget_item_title, task.title)
 
-        // ── Title colour + flag / pin icon visibility ─────────────────────────
+        // ── Title colour (priority: urgent > pinned > XML default) ────────────
         //
-        // For urgent and pinned tasks we override the XML default text colour.
-        // For normal tasks we deliberately do NOT call setTextColor so that the
-        // theme-aware @color/widget_text_primary defined in widget_task_item.xml
-        // is used. Hardcoding a near-white value (#EEEEEE) here caused the title
-        // to be invisible on light-mode (white) widget backgrounds.
+        // Normal tasks: do NOT call setTextColor — let the XML-defined
+        // @color/widget_text_primary apply (theme-aware, visible on both light
+        // and dark widget backgrounds).
         when {
-            task.isUrgent -> {
-                rv.setTextColor(R.id.widget_item_title, COLOR_URGENT)
-                rv.setViewVisibility(R.id.widget_item_flag, View.VISIBLE)
-                rv.setInt(R.id.widget_item_flag, "setColorFilter", COLOR_URGENT)
-                rv.setViewVisibility(R.id.widget_item_pin, View.GONE)
-                rv.setInt(R.id.widget_item_pin, "setColorFilter", 0)  // clear any stale tint
-            }
-            task.isPinned -> {
-                rv.setTextColor(R.id.widget_item_title, COLOR_PINNED)
-                rv.setViewVisibility(R.id.widget_item_pin, View.VISIBLE)
-                rv.setInt(R.id.widget_item_pin, "setColorFilter", COLOR_PINNED)
-                rv.setViewVisibility(R.id.widget_item_flag, View.GONE)
-                rv.setInt(R.id.widget_item_flag, "setColorFilter", 0)  // clear any stale tint
-            }
-            else -> {
-                // Let the XML-defined @color/widget_text_primary apply — do not
-                // override with a hardcoded colour that may be invisible on light
-                // widget backgrounds.
-                rv.setViewVisibility(R.id.widget_item_flag, View.GONE)
-                rv.setInt(R.id.widget_item_flag, "setColorFilter", 0)
-                rv.setViewVisibility(R.id.widget_item_pin, View.GONE)
-                rv.setInt(R.id.widget_item_pin, "setColorFilter", 0)
-            }
+            task.isUrgent -> rv.setTextColor(R.id.widget_item_title, COLOR_URGENT)
+            task.isPinned -> rv.setTextColor(R.id.widget_item_title, COLOR_PINNED)
+            // else: no setTextColor call — XML default applies
         }
 
-        // ── Checkbox tint ─────────────────────────────────────────────────────
-        val dotColor = when {
-            task.isUrgent -> COLOR_URGENT
-            task.isPinned -> COLOR_PINNED
-            else          -> COLOR_DEFAULT
-        }
-        rv.setInt(R.id.widget_item_dot, "setColorFilter", dotColor)
+        // ── Icon tints — INDEPENDENT of each other ────────────────────────────
+        //
+        // Flag and pin states are orthogonal. A task can be both urgent and
+        // pinned simultaneously. Each icon reflects only its own state.
+        val flagTint = if (task.isUrgent) COLOR_URGENT  else colorIconInactive
+        val pinTint  = if (task.isPinned) COLOR_PINNED  else colorIconInactive
+        rv.setInt(R.id.widget_item_flag, "setColorFilter", flagTint)
+        rv.setInt(R.id.widget_item_pin,  "setColorFilter", pinTint)
 
-        // ── Due date ──────────────────────────────────────────────────────────
+        // ── Checkbox: NO tint change — always renders with XML default ────────
+        // (Removing the setColorFilter call on widget_item_dot fixes the
+        //  coloured-box artefact reported by the user.)
+
+        // ── Calendar event indicator ───────────────────────────────────────────
+        // Flag and pin are shown on ALL rows (tasks and events alike).
+        // The calendar icon is shown ONLY on event rows, alongside the icons.
+        val isEvent = task.status == "event"
+        rv.setViewVisibility(
+            R.id.widget_item_calendar,
+            if (isEvent) View.VISIBLE else View.GONE
+        )
+        if (isEvent) {
+            rv.setInt(R.id.widget_item_calendar, "setColorFilter", colorIconInactive)
+        }
+
+        // ── Due date / event date+time ──────────────────────────────────────
+        // All-day events are stored at UTC midnight (time-of-day == 00:00 UTC).
+        // Timed events are stored at the actual local time converted to epoch millis.
+        // We detect all-day by checking if the UTC time-of-day is exactly midnight.
         val dueDate = task.dueDate
         if (dueDate != null) {
-            val formatted = Instant.ofEpochMilli(dueDate)
-                .atZone(ZoneId.systemDefault())
-                .format(DUE_DATE_FMT)
-            rv.setTextViewText(R.id.widget_item_due, formatted)
-            rv.setViewVisibility(R.id.widget_item_due, View.VISIBLE)
+            val zone       = ZoneId.systemDefault()
+            val dueInstant = Instant.ofEpochMilli(dueDate)
+            val dueUtc     = dueInstant.atZone(ZoneOffset.UTC)
+            val isAllDay   = dueUtc.hour == 0 && dueUtc.minute == 0 && dueUtc.second == 0
+            val dueZdt     = dueInstant.atZone(zone)
+            val dueLocal   = dueZdt.toLocalDate()
+            val today      = java.time.LocalDate.now(zone)
+            val label = if (isAllDay) {
+                // All-day: show date only, no time
+                when (dueLocal) {
+                    today              -> "Today"
+                    today.plusDays(1)  -> "Tomorrow"
+                    today.minusDays(1) -> "Yesterday"
+                    else               -> dueZdt.format(
+                        java.time.format.DateTimeFormatter.ofPattern("MMM d")
+                    )
+                }
+            } else {
+                // Timed: show date + time
+                val timePart = dueZdt.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+                when (dueLocal) {
+                    today              -> "Today, $timePart"
+                    today.plusDays(1)  -> "Tomorrow, $timePart"
+                    today.minusDays(1) -> "Yesterday, $timePart"
+                    else               -> dueZdt.format(
+                        java.time.format.DateTimeFormatter.ofPattern("MMM d, HH:mm")
+                    )
+                }
+            }
+            rv.setTextViewText(R.id.widget_item_due, label)
+            rv.setViewVisibility(R.id.widget_item_date_row, View.VISIBLE)
         } else {
-            rv.setViewVisibility(R.id.widget_item_due, View.GONE)
+            rv.setViewVisibility(R.id.widget_item_date_row, View.GONE)
         }
 
-        // ── Fill-in intent: carries task ID to the completion template ─────────
-        val fillIn = Intent().apply {
-            putExtra(EXTRA_TASK_ID, task.id)
-        }
-        rv.setOnClickFillInIntent(R.id.widget_item_root, fillIn)
+        // ── Fill-in intents for each tap target ───────────────────────────────
+        //
+        // Each fill-in intent is merged with the template PendingIntent set on
+        // the list in pushWidget(). The template provides the action and class;
+        // the fill-in adds the task ID and the specific row action.
+
+        // Checkbox → complete task
+        rv.setOnClickFillInIntent(
+            R.id.widget_item_dot,
+            Intent().apply {
+                putExtra(EXTRA_TASK_ID,    task.id)
+                putExtra(EXTRA_ROW_ACTION, ROW_ACTION_COMPLETE)
+            }
+        )
+
+        // Flag icon → toggle urgent
+        rv.setOnClickFillInIntent(
+            R.id.widget_item_flag,
+            Intent().apply {
+                putExtra(EXTRA_TASK_ID,    task.id)
+                putExtra(EXTRA_ROW_ACTION, ROW_ACTION_TOGGLE_FLAG)
+            }
+        )
+
+        // Pin icon → toggle pinned
+        rv.setOnClickFillInIntent(
+            R.id.widget_item_pin,
+            Intent().apply {
+                putExtra(EXTRA_TASK_ID,    task.id)
+                putExtra(EXTRA_ROW_ACTION, ROW_ACTION_TOGGLE_PIN)
+            }
+        )
 
         return rv
     }

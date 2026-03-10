@@ -30,4 +30,12 @@
 
     <!-- Divider line — subtle dark -->
     <color name="widget_divider">#33000000</color>
+
+    <!--
+        Inactive flag / pin icon tint — dark at 40% opacity in light mode.
+        Matches widget_checkbox_stroke so inactive icons blend with the
+        checkbox and feel like part of the same muted UI layer.
+        The dark-mode counterpart in values-night/ uses 40% white instead.
+    -->
+    <color name="widget_icon_inactive">#661C1C2E</color>
 </resources>

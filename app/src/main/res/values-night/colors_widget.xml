@@ -3,26 +3,39 @@
     colors_widget.xml  (values-night = dark mode)
     ─────────────────────────────────────────────────────────────────────────
     Widget colour tokens for DARK mode.
-    The light-mode defaults live in res/values/colors_widget.xml.
+    The light-mode counterparts live in res/values/colors_widget.xml.
+
+    Android automatically picks the correct file based on the system's
+    night-mode setting. Because AppWidgetManager.updateAppWidget() is called
+    on every configuration change, the widget re-renders with the correct
+    colours whenever the user switches between light and dark mode.
 
     Place at: app/src/main/res/values-night/colors_widget.xml
 -->
 <resources>
-    <!-- Widget frame background — deep navy in dark mode -->
+    <!-- Widget frame background — dark in dark mode -->
     <color name="widget_background">#1C1C2E</color>
 
     <!-- Task row card background — slightly lighter than frame in dark mode -->
-    <color name="widget_item_card">#2A2740</color>
+    <color name="widget_item_card">#2A2A3E</color>
 
-    <!-- Checkbox stroke colour — white at 50% opacity in dark mode -->
-    <color name="widget_checkbox_stroke">#80FFFFFF</color>
+    <!-- Checkbox stroke colour — white at 40% opacity in dark mode -->
+    <color name="widget_checkbox_stroke">#66FFFFFF</color>
 
-    <!-- Primary text — white in dark mode -->
-    <color name="widget_text_primary">#FFFFFF</color>
+    <!-- Primary text (title, task names) — near-white in dark mode -->
+    <color name="widget_text_primary">#F0F0FF</color>
 
-    <!-- Secondary text — muted white -->
-    <color name="widget_text_secondary">#99FFFFFF</color>
+    <!-- Secondary text (due dates, empty state) — muted white -->
+    <color name="widget_text_secondary">#99F0F0FF</color>
 
     <!-- Divider line — subtle white -->
     <color name="widget_divider">#33FFFFFF</color>
+
+    <!--
+        Inactive flag / pin icon tint — white at 40% opacity in dark mode.
+        Matches widget_checkbox_stroke so inactive icons blend with the
+        checkbox and feel like part of the same muted UI layer.
+        The light-mode counterpart in values/ uses 40% dark instead.
+    -->
+    <color name="widget_icon_inactive">#66FFFFFF</color>
 </resources>

@@ -134,7 +134,25 @@
             android:name=".widget.MicPermissionActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
-            android:excludeFromRecents="true" />
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance" />
+
+        <!--
+            CalendarPermissionActivity — transparent trampoline Activity that
+            requests READ_CALENDAR + WRITE_CALENDAR on behalf of
+            WidgetOverlayService. Services cannot call requestPermissions()
+            directly, so this zero-UI Activity is launched on the first
+            calendar event creation attempt when permissions have not yet
+            been granted.
+        -->
+        <activity
+            android:name=".widget.CalendarPermissionActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance" />
 
         <!--
             OverlayPermissionDialogActivity — transparent trampoline Activity
@@ -146,7 +164,9 @@
             android:name=".widget.OverlayPermissionDialogActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
-            android:excludeFromRecents="true" />
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance" />
 
     </application>
 

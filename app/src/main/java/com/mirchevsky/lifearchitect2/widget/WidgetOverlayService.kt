@@ -26,6 +26,7 @@ import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -42,6 +43,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
@@ -64,6 +66,7 @@ import com.mirchevsky.lifearchitect2.R
 import com.mirchevsky.lifearchitect2.ui.theme.AppTheme
 import com.mirchevsky.lifearchitect2.data.db.AppDatabase
 import com.mirchevsky.lifearchitect2.data.db.entity.TaskEntity
+import com.mirchevsky.lifearchitect2.widget.CalendarPermissionActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -73,6 +76,7 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.TimeZone
 import java.util.UUID
@@ -95,7 +99,7 @@ import java.util.UUID
  * UI flow:
  *   TITLE step  → user types event title, taps "Set Date & Time"
  *   DATE  step  → inline DatePicker, taps "Next: Set Time"
- *   TIME  step  → inline TimeInput, taps "Create Event" → inserts & dismisses
+ *   TIME  step  → "All day" toggle + optional inline TimeInput, taps "Create Event"
  *
  * Place at:
  *   app/src/main/java/com/mirchevsky/lifearchitect2/widget/WidgetOverlayService.kt
@@ -107,6 +111,10 @@ class WidgetOverlayService : Service() {
         const val ACTION_ADD_TASK  = "com.mirchevsky.lifearchitect2.OVERLAY_ADD_TASK"
         const val ACTION_ADD_EVENT = "com.mirchevsky.lifearchitect2.OVERLAY_ADD_EVENT"
         const val ACTION_MIC       = "com.mirchevsky.lifearchitect2.OVERLAY_MIC"
+        const val ACTION_SHOW_XP   = "com.mirchevsky.lifearchitect2.OVERLAY_SHOW_XP"
+
+        const val EXTRA_XP_AMOUNT  = "xp_amount"
+        const val EXTRA_XP_LABEL   = "xp_label"
 
         private const val CHANNEL_ID = "widget_overlay_channel"
         private const val NOTIF_ID   = 9001
@@ -119,9 +127,10 @@ class WidgetOverlayService : Service() {
             }
     }
 
-    // ── State ─────────────────────────────────────────────────────────────────
+    // ── State ─────────────────────────────────────────────────────────────
     private lateinit var windowManager: WindowManager
     private var overlayView: ComposeView? = null
+    private var feedbackView: ComposeView? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     // ── Lifecycle owner shim (required for ComposeView outside an Activity) ───
@@ -150,7 +159,11 @@ class WidgetOverlayService : Service() {
         if (!Settings.canDrawOverlays(this)) {
             startActivity(
                 Intent(this, OverlayPermissionDialogActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_NO_HISTORY or
+                                Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                    )
             )
             stopSelf()
             return START_NOT_STICKY
@@ -164,8 +177,41 @@ class WidgetOverlayService : Service() {
         when (intent?.action) {
             ACTION_ADD_TASK  -> showOverlay(OverlayMode.ADD_TASK, widgetId)
             ACTION_MIC       -> showOverlay(OverlayMode.MIC, widgetId)
-            ACTION_ADD_EVENT -> showOverlay(OverlayMode.ADD_EVENT, widgetId)
-            else             -> stopSelf()
+            ACTION_SHOW_XP -> {
+                if (Settings.canDrawOverlays(this)) {
+                    val xp    = intent?.getIntExtra(EXTRA_XP_AMOUNT, 10) ?: 10
+                    val label = intent?.getStringExtra(EXTRA_XP_LABEL) ?: "+${xp} XP"
+                    showFeedbackOverlay(label)
+                } else {
+                    stopSelf()
+                }
+            }
+            ACTION_ADD_EVENT -> {
+                // Check calendar permissions before showing the panel.
+                // On the very first tap the user will be prompted to grant
+                // READ_CALENDAR + WRITE_CALENDAR; after granting they can
+                // re-tap the calendar button to open the panel.
+                val hasRead  = ContextCompat.checkSelfPermission(
+                    this, android.Manifest.permission.READ_CALENDAR
+                ) == PackageManager.PERMISSION_GRANTED
+                val hasWrite = ContextCompat.checkSelfPermission(
+                    this, android.Manifest.permission.WRITE_CALENDAR
+                ) == PackageManager.PERMISSION_GRANTED
+                if (!hasRead || !hasWrite) {
+                    startActivity(
+                        Intent(this, CalendarPermissionActivity::class.java)
+                            .addFlags(
+                                Intent.FLAG_ACTIVITY_NEW_TASK or
+                                        Intent.FLAG_ACTIVITY_NO_HISTORY or
+                                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                            )
+                    )
+                    stopSelf()
+                } else {
+                    showOverlay(OverlayMode.ADD_EVENT, widgetId)
+                }
+            }
+            else -> stopSelf()
         }
         return START_NOT_STICKY
     }
@@ -174,6 +220,7 @@ class WidgetOverlayService : Service() {
 
     override fun onDestroy() {
         removeOverlay()
+        removeFeedbackOverlay()
         lifecycleOwner.lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         serviceScope.cancel()
         super.onDestroy()
@@ -232,7 +279,7 @@ class WidgetOverlayService : Service() {
                     OverlayPanel(
                         mode = mode,
                         onDismiss = { dismissOverlay(widgetId, taskSaved = false) },
-                        onSaved   = { dismissOverlay(widgetId, taskSaved = true) }
+                        onSaved   = { message -> dismissOverlayWithFeedback(widgetId, message) }
                     )
                 }
             }
@@ -249,11 +296,32 @@ class WidgetOverlayService : Service() {
         }
     }
 
+    private fun removeFeedbackOverlay() {
+        feedbackView?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) {}
+            feedbackView = null
+        }
+    }
+
+    /**
+     * Dismisses the input panel, refreshes the widget, then shows a floating
+     * feedback toast (e.g. "Task Saved", "Event Created") via a separate
+     * WindowManager ComposeView that auto-dismisses after its animation.
+     */
+    private fun dismissOverlayWithFeedback(widgetId: Int, feedbackMessage: String) {
+        removeOverlay()
+        TaskWidgetProvider.sendRefreshBroadcast(this@WidgetOverlayService)
+        if (feedbackMessage.isNotBlank()) {
+            showFeedbackOverlay(feedbackMessage)
+        } else {
+            // Silent dismiss — no toast, just stop the service.
+            stopSelf()
+        }
+    }
+
     /**
      * Dismisses the overlay and, when something was saved, triggers a full
      * widget rebuild via [TaskWidgetProvider.sendRefreshBroadcast].
-     *
-     * Replaces the deprecated AppWidgetManager.notifyAppWidgetViewDataChanged().
      */
     private fun dismissOverlay(widgetId: Int, taskSaved: Boolean) {
         removeOverlay()
@@ -263,12 +331,96 @@ class WidgetOverlayService : Service() {
         stopSelf()
     }
 
+    /**
+     * Shows a lightweight floating feedback overlay using a separate WindowManager
+     * ComposeView. The overlay floats upward, fades out, then removes itself —
+     * no app launch required.
+     *
+     * @param message The text to display (e.g. "Task Saved", "Event Created").
+     */
+    private fun showFeedbackOverlay(message: String) {
+        removeFeedbackOverlay()
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            y = 160
+        }
+
+        val composeView = ComposeView(this).apply {
+            setViewTreeLifecycleOwner(lifecycleOwner)
+            setViewTreeSavedStateRegistryOwner(lifecycleOwner)
+            setContent {
+                AppTheme {
+                    FeedbackToast(
+                        message = message,
+                        onDismiss = {
+                            removeFeedbackOverlay()
+                            stopSelf()
+                        }
+                    )
+                }
+            }
+        }
+
+        feedbackView = composeView
+        windowManager.addView(composeView, params)
+    }
+
     // ── Compose UI ────────────────────────────────────────────────────────────
+
+    /**
+     * Floating animated toast that floats upward and fades out, then calls
+     * [onDismiss] so the WindowManager view can be removed without opening the app.
+     */
+    @Composable
+    private fun FeedbackToast(message: String, onDismiss: () -> Unit) {
+        val yOffset = remember { Animatable(0f) }
+        val alpha   = remember { Animatable(1f) }
+
+        LaunchedEffect(Unit) {
+            yOffset.animateTo(
+                targetValue = -120f,
+                animationSpec = tween(durationMillis = 1500)
+            )
+            alpha.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 400)
+            )
+            onDismiss()
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .padding(bottom = 32.dp),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Text(
+                text = message,
+                color = Color(0xFF7C3AED),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier
+                    .offset(y = yOffset.value.dp)
+                    .alpha(alpha.value)
+            )
+        }
+    }
+
     @Composable
     private fun OverlayPanel(
         mode: OverlayMode,
         onDismiss: () -> Unit,
-        onSaved: () -> Unit
+        onSaved: (String) -> Unit
     ) {
         var visible by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { visible = true }
@@ -297,6 +449,7 @@ class WidgetOverlayService : Service() {
                         OverlayMode.MIC       -> MicPanel(onDismiss, onSaved)
                         OverlayMode.ADD_EVENT -> AddEventPanel(onDismiss, onSaved)
                     }
+
                 }
             }
         }
@@ -305,7 +458,7 @@ class WidgetOverlayService : Service() {
     // ── Add Task panel ────────────────────────────────────────────────────────
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun AddTaskPanel(onDismiss: () -> Unit, onSaved: () -> Unit) {
+    private fun AddTaskPanel(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
         var title      by remember { mutableStateOf("") }
         var difficulty by remember { mutableStateOf("medium") }
         var isSaving   by remember { mutableStateOf(false) }
@@ -327,19 +480,19 @@ class WidgetOverlayService : Service() {
                 )
                 launch(Dispatchers.Main) {
                     keyboard?.hide()
-                    onSaved()
+                    // No toast for regular task add — just dismiss silently.
+                    onSaved("")
                 }
             }
         }
 
         PanelSurface {
             DragHandle()
-            PanelTitle("New Task", onDismiss)
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("Task title") },
+                label = { Text("Task...") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(
@@ -350,14 +503,6 @@ class WidgetOverlayService : Service() {
                 colors = outlinedTextFieldColors()
             )
             Spacer(Modifier.height(16.dp))
-            Text("Difficulty", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DifficultyChip("Easy",   "easy",   Color(0xFF22C55E), difficulty) { difficulty = it }
-                DifficultyChip("Medium", "medium", Color(0xFFF59E0B), difficulty) { difficulty = it }
-                DifficultyChip("Hard",   "hard",   Color(0xFFEF4444), difficulty) { difficulty = it }
-            }
-            Spacer(Modifier.height(24.dp))
             Button(
                 onClick = { save() },
                 enabled = title.isNotBlank() && !isSaving,
@@ -374,7 +519,7 @@ class WidgetOverlayService : Service() {
     // ── Mic / Voice panel ─────────────────────────────────────────────────────
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun MicPanel(onDismiss: () -> Unit, onSaved: () -> Unit) {
+    private fun MicPanel(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
         val hasAudio = ContextCompat.checkSelfPermission(
             applicationContext, android.Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
@@ -382,7 +527,11 @@ class WidgetOverlayService : Service() {
         if (!hasAudio) {
             startActivity(
                 Intent(applicationContext, MicPermissionActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_NO_HISTORY or
+                                Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                    )
             )
             onDismiss()
             return
@@ -439,7 +588,7 @@ class WidgetOverlayService : Service() {
                         isCompleted = false
                     )
                 )
-                launch(Dispatchers.Main) { keyboard?.hide(); onSaved() }
+                launch(Dispatchers.Main) { keyboard?.hide(); onSaved("") }
             }
         }
 
@@ -495,14 +644,15 @@ class WidgetOverlayService : Service() {
      *
      * TITLE → user types title, taps "Set Date & Time"
      * DATE  → inline DatePicker, taps "Next: Set Time"
-     * TIME  → inline TimeInput, taps "Create Event" → inserts & dismisses
+     * TIME  → "All day" toggle + optional inline TimeInput, taps "Create Event"
      */
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun AddEventPanel(onDismiss: () -> Unit, onSaved: () -> Unit) {
+    private fun AddEventPanel(onDismiss: () -> Unit, onSaved: (String) -> Unit) {
 
         var eventTitle by remember { mutableStateOf("") }
         var isSaving   by remember { mutableStateOf(false) }
+        var isAllDay   by remember { mutableStateOf(false) }
         var step       by remember { mutableStateOf(EventStep.TITLE) }
         val keyboard   = LocalSoftwareKeyboardController.current
 
@@ -522,9 +672,83 @@ class WidgetOverlayService : Service() {
             initialHour = 9, initialMinute = 0, is24Hour = true
         )
 
+        // ── Helper: resolve the primary (or first available) calendar ID ──────
+        suspend fun resolveCalendarId(): Long? {
+            val projection = arrayOf(CalendarContract.Calendars._ID)
+            val cr = contentResolver
+            return withContext(Dispatchers.IO) {
+                try {
+                    cr.query(
+                        CalendarContract.Calendars.CONTENT_URI, projection,
+                        "${CalendarContract.Calendars.IS_PRIMARY} = 1", null, null
+                    )?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+                } catch (e: Exception) { Log.e(TAG, "Primary calendar query failed", e); null }
+                    ?: try {
+                        cr.query(
+                            CalendarContract.Calendars.CONTENT_URI, projection, null, null, null
+                        )?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+                    } catch (e: Exception) { Log.e(TAG, "Any-calendar query failed", e); null }
+            }
+        }
+
+        // ── Helper: request a sync on the calendar account after inserting ────
+        suspend fun requestSync(calendarId: Long) {
+            val cr = contentResolver
+            withContext(Dispatchers.IO) {
+                try {
+                    cr.query(
+                        CalendarContract.Calendars.CONTENT_URI,
+                        arrayOf(
+                            CalendarContract.Calendars.ACCOUNT_NAME,
+                            CalendarContract.Calendars.ACCOUNT_TYPE
+                        ),
+                        "${CalendarContract.Calendars._ID} = ?",
+                        arrayOf(calendarId.toString()), null
+                    )?.use { c ->
+                        if (c.moveToFirst()) {
+                            val account = Account(c.getString(0), c.getString(1))
+                            ContentResolver.requestSync(
+                                account, CalendarContract.AUTHORITY,
+                                Bundle().apply {
+                                    putBoolean(ContentResolver.SYNC_EXTRAS_EXPEDITED, true)
+                                    putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true)
+                                }
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Sync request failed (non-critical)", e)
+                }
+            }
+        }
+
+        // ── Timed event creation ──────────────────────────────────────────────
         fun createEvent() {
             if (eventTitle.isBlank()) return
             val dateMillis = datePickerState.selectedDateMillis ?: return
+
+            // Guard: calendar permissions must be granted at runtime.
+            val hasCalendarPerms = ContextCompat.checkSelfPermission(
+                applicationContext, android.Manifest.permission.READ_CALENDAR
+            ) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(
+                        applicationContext, android.Manifest.permission.WRITE_CALENDAR
+                    ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasCalendarPerms) {
+                startActivity(
+                    Intent(applicationContext, CalendarPermissionActivity::class.java)
+                        .addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_NO_HISTORY or
+                                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                        )
+                )
+                // Dismiss the panel — user can re-open it after granting.
+                onDismiss()
+                return
+            }
+
             val dueDateTime = Instant.ofEpochMilli(dateMillis)
                 .atZone(ZoneId.systemDefault())
                 .toLocalDateTime()
@@ -538,22 +762,7 @@ class WidgetOverlayService : Service() {
                     .atZone(ZoneId.systemDefault())
                     .toInstant()
                     .toEpochMilli()
-                val projection = arrayOf(CalendarContract.Calendars._ID)
-                val cr = contentResolver
-
-                val calendarId: Long? = withContext(Dispatchers.IO) {
-                    try {
-                        cr.query(
-                            CalendarContract.Calendars.CONTENT_URI, projection,
-                            "${CalendarContract.Calendars.IS_PRIMARY} = 1", null, null
-                        )?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
-                    } catch (e: Exception) { Log.e(TAG, "Primary calendar query failed", e); null }
-                        ?: try {
-                            cr.query(
-                                CalendarContract.Calendars.CONTENT_URI, projection, null, null, null
-                            )?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
-                        } catch (e: Exception) { Log.e(TAG, "Any-calendar query failed", e); null }
-                }
+                val calendarId = resolveCalendarId()
 
                 if (calendarId != null) {
                     val values = ContentValues().apply {
@@ -564,50 +773,115 @@ class WidgetOverlayService : Service() {
                         put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
                     }
                     val uri = withContext(Dispatchers.IO) {
-                        try { cr.insert(CalendarContract.Events.CONTENT_URI, values) }
+                        try { contentResolver.insert(CalendarContract.Events.CONTENT_URI, values) }
                         catch (e: Exception) { Log.e(TAG, "Calendar insert failed", e); null }
                     }
                     if (uri != null) {
+                        requestSync(calendarId)
+                        // Also insert a TaskEntity so the widget list reflects the event.
                         withContext(Dispatchers.IO) {
-                            try {
-                                cr.query(
-                                    CalendarContract.Calendars.CONTENT_URI,
-                                    arrayOf(
-                                        CalendarContract.Calendars.ACCOUNT_NAME,
-                                        CalendarContract.Calendars.ACCOUNT_TYPE
-                                    ),
-                                    "${CalendarContract.Calendars._ID} = ?",
-                                    arrayOf(calendarId.toString()), null
-                                )?.use { c ->
-                                    if (c.moveToFirst()) {
-                                        val account = Account(c.getString(0), c.getString(1))
-                                        ContentResolver.requestSync(
-                                            account, CalendarContract.AUTHORITY,
-                                            Bundle().apply {
-                                                putBoolean(ContentResolver.SYNC_EXTRAS_EXPEDITED, true)
-                                                putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true)
-                                            }
-                                        )
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Sync request failed (non-critical)", e)
-                            }
+                            AppDatabase.getDatabase(applicationContext).taskDao().upsertTask(
+                                TaskEntity(
+                                    id          = UUID.randomUUID().toString(),
+                                    userId      = "local_user",
+                                    title       = eventTitle.trim(),
+                                    difficulty  = "medium",
+                                    status      = "event",
+                                    isCompleted = false,
+                                    dueDate     = epochMillis
+                                )
+                            )
                         }
+                    } else {
+                        Log.e(TAG, "Calendar insert returned null URI — event not saved")
                     }
                 } else {
-                    val intent = Intent(Intent.ACTION_INSERT).apply {
-                        data = CalendarContract.Events.CONTENT_URI
-                        putExtra(CalendarContract.Events.TITLE, eventTitle.trim())
-                        putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, epochMillis)
-                        putExtra(CalendarContract.EXTRA_EVENT_END_TIME, epochMillis + 3_600_000L)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    startActivity(intent)
+                    Log.e(TAG, "No calendar found — cannot insert event directly")
                 }
 
                 keyboard?.hide()
-                onSaved()
+                onSaved("Added to Calendar")
+            }
+        }
+
+        // ── All-day event creation ────────────────────────────────────────────
+        fun createAllDayEvent() {
+            if (eventTitle.isBlank()) return
+            val dateMillis = datePickerState.selectedDateMillis ?: return
+
+            // Guard: calendar permissions must be granted at runtime.
+            val hasCalendarPerms = ContextCompat.checkSelfPermission(
+                applicationContext, android.Manifest.permission.READ_CALENDAR
+            ) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(
+                        applicationContext, android.Manifest.permission.WRITE_CALENDAR
+                    ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasCalendarPerms) {
+                startActivity(
+                    Intent(applicationContext, CalendarPermissionActivity::class.java)
+                        .addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_NO_HISTORY or
+                                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                        )
+                )
+                onDismiss()
+                return
+            }
+
+            // All-day events use UTC midnight boundaries for the chosen local date.
+            val localDate = Instant.ofEpochMilli(dateMillis)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate()
+            val startUtc = localDate
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli()
+            val endUtc = startUtc + 86_400_000L // exactly one day
+
+            isSaving = true
+            serviceScope.launch {
+                val calendarId = resolveCalendarId()
+
+                if (calendarId != null) {
+                    val values = ContentValues().apply {
+                        put(CalendarContract.Events.CALENDAR_ID, calendarId)
+                        put(CalendarContract.Events.TITLE, eventTitle.trim())
+                        put(CalendarContract.Events.DTSTART, startUtc)
+                        put(CalendarContract.Events.DTEND, endUtc)
+                        put(CalendarContract.Events.ALL_DAY, 1)
+                        put(CalendarContract.Events.EVENT_TIMEZONE, "UTC")
+                    }
+                    val uri = withContext(Dispatchers.IO) {
+                        try { contentResolver.insert(CalendarContract.Events.CONTENT_URI, values) }
+                        catch (e: Exception) { Log.e(TAG, "All-day calendar insert failed", e); null }
+                    }
+                    if (uri != null) {
+                        requestSync(calendarId)
+                        // Also insert a TaskEntity so the widget list reflects the event.
+                        withContext(Dispatchers.IO) {
+                            AppDatabase.getDatabase(applicationContext).taskDao().upsertTask(
+                                TaskEntity(
+                                    id          = UUID.randomUUID().toString(),
+                                    userId      = "local_user",
+                                    title       = eventTitle.trim(),
+                                    difficulty  = "medium",
+                                    status      = "event",
+                                    isCompleted = false,
+                                    dueDate     = startUtc
+                                )
+                            )
+                        }
+                    } else {
+                        Log.e(TAG, "All-day calendar insert returned null URI — event not saved")
+                    }
+                } else {
+                    Log.e(TAG, "No calendar found — cannot insert all-day event directly")
+                }
+
+                keyboard?.hide()
+                onSaved("Added to Calendar")
             }
         }
 
@@ -615,28 +889,18 @@ class WidgetOverlayService : Service() {
             DragHandle()
 
             // ── Header ────────────────────────────────────────────────────────
+            // Title text removed; only the calendar icon + back/close button remain.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.CalendarMonth,
-                        contentDescription = null,
-                        tint = Color(0xFF7C3AED),
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Text(
-                        "New Calendar Event",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Outlined.CalendarMonth,
+                    contentDescription = null,
+                    tint = Color(0xFF7C3AED),
+                    modifier = Modifier.size(22.dp)
+                )
                 TextButton(onClick = {
                     if (step != EventStep.TITLE) step = EventStep.TITLE else onDismiss()
                 }) {
@@ -658,7 +922,7 @@ class WidgetOverlayService : Service() {
                     OutlinedTextField(
                         value = eventTitle,
                         onValueChange = { eventTitle = it },
-                        label = { Text("Event title") },
+                        placeholder = { Text("Event...") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                         keyboardOptions = KeyboardOptions(
@@ -700,9 +964,32 @@ class WidgetOverlayService : Service() {
 
                 // Step 2: inline date picker (no Dialog)
                 EventStep.DATE -> {
+                    val purple = Color(0xFF7C3AED)
                     DatePicker(
                         state = datePickerState,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        showModeToggle = false,
+                        colors = DatePickerDefaults.colors(
+                            // Selected day circle
+                            selectedDayContainerColor    = purple,
+                            selectedDayContentColor      = Color.White,
+                            // Today ring (unselected)
+                            todayContentColor            = purple,
+                            todayDateBorderColor         = purple,
+                            // Year/month picker selected item
+                            selectedYearContainerColor   = purple,
+                            selectedYearContentColor     = Color.White,
+                            // Date text-input mode border & label
+                            dateTextFieldColors          = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor   = purple,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                focusedLabelColor    = purple,
+                                unfocusedLabelColor  = MaterialTheme.colorScheme.onSurfaceVariant,
+                                cursorColor          = purple,
+                                focusedTextColor     = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor   = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
                     )
                     Spacer(Modifier.height(8.dp))
                     Button(
@@ -716,22 +1003,73 @@ class WidgetOverlayService : Service() {
                     }
                 }
 
-                // Step 3: inline time input (no Dialog) → creates event on confirm
+                // Step 3: "All day" toggle + optional inline TimeInput → creates event
                 EventStep.TIME -> {
-                    Text(
-                        "Select time",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-                    TimeInput(
-                        state = timePickerState,
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                    )
+                    // ── All-day toggle ────────────────────────────────────────
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(horizontal = 14.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "All day",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Switch(
+                            checked = isAllDay,
+                            onCheckedChange = { isAllDay = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor   = Color.White,
+                                checkedTrackColor   = Color(0xFF7C3AED),
+                                uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        )
+                    }
+
+                    // ── Time picker (hidden when all-day is on) ───────────────
+                    if (!isAllDay) {
+                        Spacer(Modifier.height(12.dp))
+                        // Wrap in a MaterialTheme override so the selected-box border
+                        // (drawn from colorScheme.primary internally by Material3) is
+                        // purple rather than the app's default green.
+                        MaterialTheme(
+                            colorScheme = MaterialTheme.colorScheme.copy(
+                                primary   = Color(0xFF7C3AED),
+                                secondary = Color(0xFF7C3AED)
+                            )
+                        ) {
+                            TimeInput(
+                                state = timePickerState,
+                                modifier = Modifier.align(Alignment.CenterHorizontally),
+                                colors = TimePickerDefaults.colors(
+                                    timeSelectorSelectedContainerColor     = Color(0xFF7C3AED),
+                                    timeSelectorSelectedContentColor       = Color.White,
+                                    timeSelectorUnselectedContainerColor   = MaterialTheme.colorScheme.surfaceVariant,
+                                    timeSelectorUnselectedContentColor     = MaterialTheme.colorScheme.onSurface,
+                                    periodSelectorSelectedContainerColor   = Color(0xFF7C3AED),
+                                    periodSelectorSelectedContentColor     = Color.White,
+                                    periodSelectorUnselectedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    periodSelectorUnselectedContentColor   = MaterialTheme.colorScheme.onSurface,
+                                    periodSelectorBorderColor              = Color(0xFF7C3AED),
+                                    clockDialColor                         = MaterialTheme.colorScheme.surfaceVariant,
+                                    clockDialSelectedContentColor          = Color.White,
+                                    clockDialUnselectedContentColor        = MaterialTheme.colorScheme.onSurface,
+                                    selectorColor                          = Color(0xFF7C3AED)
+                                )
+                            )
+                        }
+                    }
+
                     Spacer(Modifier.height(16.dp))
                     Button(
-                        onClick = { createEvent() },
+                        onClick = { if (isAllDay) createAllDayEvent() else createEvent() },
                         enabled = !isSaving,
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         shape = RoundedCornerShape(14.dp),
@@ -818,11 +1156,11 @@ class WidgetOverlayService : Service() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun outlinedTextFieldColors() = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor   = MaterialTheme.colorScheme.primary,
+        focusedBorderColor   = Color(0xFF7C3AED),
         unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-        focusedLabelColor    = MaterialTheme.colorScheme.primary,
+        focusedLabelColor    = Color(0xFF7C3AED),
         unfocusedLabelColor  = MaterialTheme.colorScheme.onSurfaceVariant,
-        cursorColor          = MaterialTheme.colorScheme.primary,
+        cursorColor          = Color(0xFF7C3AED),
         focusedTextColor     = MaterialTheme.colorScheme.onSurface,
         unfocusedTextColor   = MaterialTheme.colorScheme.onSurface
     )

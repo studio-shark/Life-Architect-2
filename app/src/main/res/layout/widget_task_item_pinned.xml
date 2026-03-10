@@ -1,19 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    widget_task_item.xml
+    widget_task_item_pinned.xml
     ─────────────────────────────────────────────────────────────────────────
-    Single task row for the Life Architect 2 home screen widget.
+    Task row layout for PINNED tasks.
 
-    Layout (matches in-app TaskItem style):
-      ┌──────────────────────────────────────────────────────────────────┐
-      │  [ ]  Task title                                        🚩  📌   │
-      │       Feb 14, 09:30  🗓                                          │
-      └──────────────────────────────────────────────────────────────────┘
+    Structurally identical to widget_task_item.xml (normal) and
+    widget_task_item_urgent.xml. Using a separate layout file forces the
+    launcher's RemoteCollectionItems view recycler to maintain a distinct
+    view cache for pinned rows.
 
-    The date row is hidden for tasks with no dueDate.
-    The calendar icon is hidden for normal tasks; shown for events.
-
-    Place at: app/src/main/res/layout/widget_task_item.xml
+    Place at: app/src/main/res/layout/widget_task_item_pinned.xml
 -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
@@ -30,7 +26,6 @@
     android:layout_marginBottom="6dp"
     android:minHeight="48dp">
 
-    <!-- Checkbox -->
     <ImageView
         android:id="@+id/widget_item_dot"
         android:layout_width="20dp"
@@ -39,7 +34,6 @@
         android:src="@drawable/widget_checkbox_unchecked"
         android:contentDescription="Complete task" />
 
-    <!-- Title + date stacked vertically, takes remaining width -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
@@ -55,7 +49,6 @@
             android:maxLines="1"
             android:ellipsize="end" />
 
-        <!-- Date row: date text + optional calendar icon, hidden when no date -->
         <LinearLayout
             android:id="@+id/widget_item_date_row"
             android:layout_width="wrap_content"
@@ -73,7 +66,6 @@
                 android:textSize="11sp"
                 android:maxLines="1" />
 
-            <!-- Calendar icon — shown only for event rows -->
             <ImageView
                 android:id="@+id/widget_item_calendar"
                 android:layout_width="12dp"
@@ -87,7 +79,6 @@
 
     </LinearLayout>
 
-    <!-- Flag icon — always visible -->
     <ImageView
         android:id="@+id/widget_item_flag"
         android:layout_width="16dp"
@@ -97,7 +88,6 @@
         android:contentDescription="Toggle urgent"
         android:visibility="visible" />
 
-    <!-- Pin icon — always visible -->
     <ImageView
         android:id="@+id/widget_item_pin"
         android:layout_width="16dp"
