@@ -1,6 +1,6 @@
 # Life Architect 2
 
-**Gamify your goals.**
+**Level up your life.**
 
 ---
 
