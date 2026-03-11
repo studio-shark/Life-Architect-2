@@ -1,18 +1,9 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-    colors_widget.xml  (dark mode overrides)
-    ─────────────────────────────────────────────────────────────────────────
-    Widget colour tokens for DARK mode.
-    Android automatically picks this file when the system is in night mode.
-
-    Place at: app/src/main/res/values-night/colors_widget.xml
--->
 <resources>
     <!-- Widget outer frame background -->
-    <color name="widget_background">#141A22</color>
+    <color name="widget_background">#0B0F14</color>
 
     <!-- Task row card background -->
-    <color name="widget_item_card">#0B0F14</color>
+    <color name="widget_item_card">#141A22</color>
 
     <!-- Divider line between rows -->
     <color name="widget_divider">#1F2933</color>

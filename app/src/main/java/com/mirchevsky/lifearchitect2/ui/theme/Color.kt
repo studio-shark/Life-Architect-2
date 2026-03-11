@@ -3,11 +3,11 @@ package com.mirchevsky.lifearchitect2.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // --- Dark Theme (Brand Guidelines) ---
-val DarkBackground        = Color(0xFF0A0A0A)
-val DarkSurface           = Color(0xFF1F2937)
-val DarkSurfaceVariant    = Color(0xFF374151)
-val DarkOnBackground      = Color(0xFFFFFFFF)
-val DarkOnSurface         = Color(0xFFFFFFFF)
+val DarkBackground        = Color(0xFF0B0F14)
+val DarkSurface           = Color(0xFF141A22)
+val DarkSurfaceVariant    = Color(0xFF1F2933)
+val DarkOnBackground      = Color(0xFFF3F4F6)
+val DarkOnSurface         = Color(0xFFF3F4F6)
 val DarkOnSurfaceVariant  = Color(0xFF9CA3AF)
 val DarkTextSecondary     = Color(0xFF9CA3AF)
 val DarkTextTertiary      = Color(0xFF6B7280)

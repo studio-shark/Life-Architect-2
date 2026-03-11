@@ -1,16 +1,19 @@
 package com.mirchevsky.lifearchitect2.widget
 
+import android.Manifest
 import android.accounts.Account
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.appwidget.AppWidgetManager
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
@@ -96,8 +99,20 @@ import java.util.UUID
  * A ForegroundService that draws a slide-up Jetpack Compose panel directly
  * onto the screen using WindowManager + TYPE_APPLICATION_OVERLAY.
  *
- * ## AddEventPanel — no Dialog wrappers
+ * ## Permission-resume flow
+ * When a permission is needed (overlay, mic, calendar), the service stores the
+ * original intent in the STATIC [pendingIntentToExecute] field in the companion
+ * object. This is critical — the service instance is destroyed when it launches
+ * a permission activity, so an instance field would be lost. The static field
+ * survives across service instances.
  *
+ * The permission activity broadcasts [ACTION_PERMISSION_GRANTED] on success.
+ * A new service instance is started, registers [permissionGrantedReceiver], and
+ * immediately picks up the broadcast. The receiver calls startService with the
+ * stored static intent, re-entering onStartCommand with the original action —
+ * this time with permission granted, so the panel opens without a second tap.
+ *
+ * ## AddEventPanel — no Dialog wrappers
  * Compose's Dialog() and DatePickerDialog() call android.app.Dialog.show()
  * internally, which requires an Activity window token. Inside a WindowManager
  * overlay service there is no Activity, so the token is null and the app
@@ -122,12 +137,27 @@ class WidgetOverlayService : Service() {
         const val ACTION_MIC       = "com.mirchevsky.lifearchitect2.OVERLAY_MIC"
         const val ACTION_SHOW_XP   = "com.mirchevsky.lifearchitect2.OVERLAY_SHOW_XP"
 
+        /**
+         * Broadcast sent by [CalendarPermissionActivity], [MicPermissionActivity],
+         * and [OverlayPermissionDialogActivity] when their respective permission is
+         * granted. The service listens for this and immediately re-executes the
+         * pending intent so the user does not need to tap the widget button again.
+         */
+        const val ACTION_PERMISSION_GRANTED = "com.mirchevsky.lifearchitect2.OVERLAY_PERMISSION_GRANTED"
+
         const val EXTRA_XP_AMOUNT  = "xp_amount"
         const val EXTRA_XP_LABEL   = "xp_label"
 
         private const val CHANNEL_ID = "widget_overlay_channel"
         private const val NOTIF_ID   = 9001
         private const val TAG        = "WidgetOverlayService"
+
+        /**
+         * STATIC — stores the original intent when a permission gate is hit.
+         * Must be static because the service instance is destroyed when it
+         * launches a permission activity. A static field persists across instances.
+         */
+        private var pendingIntentToExecute: Intent? = null
 
         fun buildIntent(context: Context, action: String, widgetId: Int): Intent =
             Intent(context, WidgetOverlayService::class.java).apply {
@@ -151,6 +181,21 @@ class WidgetOverlayService : Service() {
             get() = savedStateRegistryController.savedStateRegistry
     }
 
+    /**
+     * Receives [ACTION_PERMISSION_GRANTED] from the permission activities and
+     * immediately re-executes the static pending intent so the overlay panel
+     * opens without requiring a second tap from the user.
+     */
+    private val permissionGrantedReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_PERMISSION_GRANTED) {
+                Log.d(TAG, "Permission granted — resuming pending action.")
+                pendingIntentToExecute?.let { startService(it) }
+                pendingIntentToExecute = null
+            }
+        }
+    }
+
     // ── Service lifecycle ─────────────────────────────────────────────────────
     override fun onCreate() {
         super.onCreate()
@@ -158,6 +203,14 @@ class WidgetOverlayService : Service() {
         lifecycleOwner.savedStateRegistryController.performRestore(null)
         lifecycleOwner.lifecycleRegistry.currentState = Lifecycle.State.CREATED
         createNotificationChannel()
+        // Register the permission-resume receiver so we can react to grants
+        // even when this is a freshly created service instance.
+        ContextCompat.registerReceiver(
+            this,
+            permissionGrantedReceiver,
+            IntentFilter(ACTION_PERMISSION_GRANTED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -165,7 +218,9 @@ class WidgetOverlayService : Service() {
         lifecycleOwner.lifecycleRegistry.currentState = Lifecycle.State.STARTED
         lifecycleOwner.lifecycleRegistry.currentState = Lifecycle.State.RESUMED
 
+        // ── Overlay permission gate (applies to all actions) ──────────────────
         if (!Settings.canDrawOverlays(this)) {
+            pendingIntentToExecute = intent   // store statically before destroying
             startActivity(
                 Intent(this, OverlayPermissionDialogActivity::class.java)
                     .addFlags(
@@ -174,8 +229,8 @@ class WidgetOverlayService : Service() {
                                 Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
                     )
             )
-            stopSelf()
-            return START_NOT_STICKY
+            // Keep alive so the receiver can fire when the activity broadcasts.
+            return START_STICKY
         }
 
         val widgetId = intent?.getIntExtra(
@@ -185,7 +240,27 @@ class WidgetOverlayService : Service() {
 
         when (intent?.action) {
             ACTION_ADD_TASK  -> showOverlay(OverlayMode.ADD_TASK, widgetId)
-            ACTION_MIC       -> showOverlay(OverlayMode.MIC, widgetId)
+
+            ACTION_MIC -> {
+                val hasAudio = ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                if (!hasAudio) {
+                    pendingIntentToExecute = intent   // store statically
+                    startActivity(
+                        Intent(this, MicPermissionActivity::class.java)
+                            .addFlags(
+                                Intent.FLAG_ACTIVITY_NEW_TASK or
+                                        Intent.FLAG_ACTIVITY_NO_HISTORY or
+                                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                            )
+                    )
+                    return START_STICKY
+                } else {
+                    showOverlay(OverlayMode.MIC, widgetId)
+                }
+            }
+
             ACTION_SHOW_XP -> {
                 if (Settings.canDrawOverlays(this)) {
                     val xp    = intent?.getIntExtra(EXTRA_XP_AMOUNT, 10) ?: 10
@@ -195,11 +270,8 @@ class WidgetOverlayService : Service() {
                     stopSelf()
                 }
             }
+
             ACTION_ADD_EVENT -> {
-                // Check calendar permissions before showing the panel.
-                // On the very first tap the user will be prompted to grant
-                // READ_CALENDAR + WRITE_CALENDAR; after granting they can
-                // re-tap the calendar button to open the panel.
                 val hasRead  = ContextCompat.checkSelfPermission(
                     this, android.Manifest.permission.READ_CALENDAR
                 ) == PackageManager.PERMISSION_GRANTED
@@ -207,6 +279,7 @@ class WidgetOverlayService : Service() {
                     this, android.Manifest.permission.WRITE_CALENDAR
                 ) == PackageManager.PERMISSION_GRANTED
                 if (!hasRead || !hasWrite) {
+                    pendingIntentToExecute = intent   // store statically
                     startActivity(
                         Intent(this, CalendarPermissionActivity::class.java)
                             .addFlags(
@@ -215,11 +288,12 @@ class WidgetOverlayService : Service() {
                                         Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
                             )
                     )
-                    stopSelf()
+                    return START_STICKY
                 } else {
                     showOverlay(OverlayMode.ADD_EVENT, widgetId)
                 }
             }
+
             else -> stopSelf()
         }
         return START_NOT_STICKY
@@ -230,6 +304,7 @@ class WidgetOverlayService : Service() {
     override fun onDestroy() {
         removeOverlay()
         removeFeedbackOverlay()
+        try { unregisterReceiver(permissionGrantedReceiver) } catch (_: Exception) {}
         lifecycleOwner.lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         serviceScope.cancel()
         super.onDestroy()
@@ -415,7 +490,7 @@ class WidgetOverlayService : Service() {
         ) {
             Text(
                 text = message,
-                color = Color(0xFF22C55E),
+                color = Color(0xFF10B981),
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
                 modifier = Modifier
@@ -517,7 +592,7 @@ class WidgetOverlayService : Service() {
                 enabled = title.isNotBlank() && !isSaving,
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E))
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
             ) {
                 Text(if (isSaving) "Saving…" else "Save Task",
                     fontWeight = FontWeight.Bold, fontSize = 15.sp)
@@ -641,9 +716,9 @@ class WidgetOverlayService : Service() {
                 if (isListening) {
                     // Three animated dots in app green/purple/green
                     val dotColors = listOf(
-                        Color(0xFF22C55E),
+                        Color(0xFF10B981),
                         Color(0xFF7C3AED),
-                        Color(0xFF22C55E)
+                        Color(0xFF10B981)
                     )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -679,7 +754,7 @@ class WidgetOverlayService : Service() {
                         Icon(
                             imageVector = Icons.Default.Mic,
                             contentDescription = "Record again",
-                            tint = Color(0xFF22C55E),
+                            tint = Color(0xFF10B981),
                             modifier = Modifier.size(36.dp)
                         )
                     }
@@ -707,7 +782,7 @@ class WidgetOverlayService : Service() {
                 enabled = title.isNotBlank() && !isSaving,
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E))
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
             ) {
                 Text(if (isSaving) "Saving…" else "Save Task",
                     fontWeight = FontWeight.Bold, fontSize = 15.sp)
@@ -1249,14 +1324,42 @@ class WidgetOverlayService : Service() {
 
     @Composable
     private fun greenTextFieldColors() = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor   = Color(0xFF22C55E),
+        focusedBorderColor   = Color(0xFF10B981),
         unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-        focusedLabelColor    = Color(0xFF22C55E),
+        focusedLabelColor    = Color(0xFF10B981),
         unfocusedLabelColor  = MaterialTheme.colorScheme.onSurfaceVariant,
-        cursorColor          = Color(0xFF22C55E),
+        cursorColor          = Color(0xFF10B981),
         focusedTextColor     = MaterialTheme.colorScheme.onSurface,
         unfocusedTextColor   = MaterialTheme.colorScheme.onSurface
     )
+
+    @Composable
+    private fun PulsingMicIndicator() {
+        val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
+        val scale by infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue  = 1.3f,
+            animationSpec = infiniteRepeatable(
+                animation  = tween(600, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "mic_scale"
+        )
+        Box(
+            modifier = Modifier
+                .size((48 * scale).dp)
+                .clip(CircleShape)
+                .background(Color(0xFF10B981).copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Mic,
+                contentDescription = "Listening",
+                tint = Color(0xFF10B981),
+                modifier = Modifier.size(28.dp)
+            )
+        }
+    }
 }
 
 // ── Enums ─────────────────────────────────────────────────────────────────────

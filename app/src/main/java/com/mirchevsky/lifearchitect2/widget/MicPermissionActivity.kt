@@ -1,19 +1,16 @@
 package com.mirchevsky.lifearchitect2.widget
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import com.mirchevsky.lifearchitect2.permissions.PermissionGateState
 import com.mirchevsky.lifearchitect2.permissions.PermissionPrefs
@@ -23,43 +20,33 @@ import com.mirchevsky.lifearchitect2.permissions.resolvePermissionGateState
 /**
  * MicPermissionActivity
  * ─────────────────────────────────────────────────────────────────────────────
- * A transparent, zero-UI trampoline Activity that requests RECORD_AUDIO on
- * behalf of [WidgetOverlayService] using the full [PermissionGateState] logic:
+ * Requests RECORD_AUDIO on behalf of [WidgetOverlayService].
  *
- * - **Not yet requested / requestable** → shows the system permission dialog.
- * - **Denied once (rationale)** → shows an in-app [AlertDialog] explaining why,
- *   then re-launches the system dialog if the user taps "Allow".
- * - **Permanently denied** → shows a "blocked" [AlertDialog] with an
- *   "Open Settings" button that deep-links to the app's permission settings.
- *
- * The Activity finishes as soon as the user makes a choice in any dialog.
- *
- * Declared in AndroidManifest.xml with:
- *   android:theme="@android:style/Theme.Translucent.NoTitleBar"
- *   android:excludeFromRecents="true"
- *   android:exported="false"
- *
- * Place at:
- *   app/src/main/java/com/mirchevsky/lifearchitect2/widget/MicPermissionActivity.kt
+ * Key change from the original: on a successful grant, this activity now broadcasts
+ * [WidgetOverlayService.ACTION_PERMISSION_GRANTED] before finishing. The service
+ * listens for this broadcast and immediately re-executes the pending intent (e.g.
+ * ACTION_MIC), so the voice panel opens automatically without requiring a second tap.
  */
 class MicPermissionActivity : ComponentActivity() {
 
     private var showRationale by mutableStateOf(false)
-    private var showBlocked   by mutableStateOf(false)
+    private var showBlocked by mutableStateOf(false)
 
     private val requestAudio = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
+            // Notify the service so it can resume the pending action immediately.
+            sendBroadcast(Intent(WidgetOverlayService.ACTION_PERMISSION_GRANTED))
             finish()
             return@registerForActivityResult
         }
-        // Re-resolve to determine whether Android will show the dialog again
+
         val prefs = PermissionPrefs(this)
         when (resolvePermissionGateState(this, Manifest.permission.RECORD_AUDIO, prefs)) {
             PermissionGateState.RequestableWithRationale -> showRationale = true
-            PermissionGateState.PermanentlyDenied        -> showBlocked   = true
-            else                                         -> finish()
+            PermissionGateState.PermanentlyDenied -> showBlocked = true
+            else -> finish()
         }
     }
 
@@ -69,6 +56,7 @@ class MicPermissionActivity : ComponentActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             == PackageManager.PERMISSION_GRANTED
         ) {
+            sendBroadcast(Intent(WidgetOverlayService.ACTION_PERMISSION_GRANTED))
             finish()
             return
         }
@@ -84,27 +72,19 @@ class MicPermissionActivity : ComponentActivity() {
             }
 
             PermissionGateState.PermanentlyDenied -> {
-                // Show blocked dialog immediately — system won't show the dialog
                 setContent {
                     MaterialTheme {
                         if (showBlocked) {
-                            AlertDialog(
-                                onDismissRequest = { finish() },
-                                title = { Text("Microphone access blocked") },
-                                text  = { Text(
-                                    "You have permanently denied microphone access. " +
-                                            "To use voice input on the widget, open Settings → " +
-                                            "Permissions → Microphone and enable it."
-                                )},
-                                confirmButton = {
-                                    TextButton(onClick = {
-                                        openAppPermissionSettings(this@MicPermissionActivity)
-                                        finish()
-                                    }) { Text("Open Settings") }
+                            PermissionDialog(
+                                title = "Microphone access blocked",
+                                text = "You have permanently denied microphone access. " +
+                                        "To use voice input on the widget, open Settings → " +
+                                        "Permissions → Microphone and enable it.",
+                                onConfirm = {
+                                    openAppPermissionSettings(this@MicPermissionActivity)
+                                    finish()
                                 },
-                                dismissButton = {
-                                    TextButton(onClick = { finish() }) { Text("Cancel") }
-                                }
+                                onDismiss = { finish() }
                             )
                         }
                     }
@@ -113,49 +93,36 @@ class MicPermissionActivity : ComponentActivity() {
             }
         }
 
-        // Rationale and blocked dialogs rendered via setContent after launch
         setContent {
             MaterialTheme {
                 if (showRationale) {
-                    AlertDialog(
-                        onDismissRequest = { finish() },
-                        title = { Text("Microphone access needed") },
-                        text  = { Text(
-                            "Life Architect needs the microphone to transcribe your voice " +
-                                    "into a task title. Tap \"Allow\" to grant access."
-                        )},
-                        confirmButton = {
-                            TextButton(onClick = {
-                                showRationale = false
-                                val prefs2 = PermissionPrefs(this@MicPermissionActivity)
-                                prefs2.markRequested(Manifest.permission.RECORD_AUDIO)
-                                requestAudio.launch(Manifest.permission.RECORD_AUDIO)
-                            }) { Text("Allow") }
+                    PermissionDialog(
+                        title = "Microphone access needed",
+                        text = "Life Architect needs the microphone to transcribe your voice " +
+                                "into a task title. Tap \"Allow\" to grant access.",
+                        onConfirm = {
+                            showRationale = false
+                            val prefs2 = PermissionPrefs(this@MicPermissionActivity)
+                            prefs2.markRequested(Manifest.permission.RECORD_AUDIO)
+                            requestAudio.launch(Manifest.permission.RECORD_AUDIO)
                         },
-                        dismissButton = {
-                            TextButton(onClick = { finish() }) { Text("Not now") }
-                        }
+                        onDismiss = { finish() },
+                        confirmText = "Allow",
+                        dismissText = "Not now"
                     )
                 }
 
                 if (showBlocked) {
-                    AlertDialog(
-                        onDismissRequest = { finish() },
-                        title = { Text("Microphone access blocked") },
-                        text  = { Text(
-                            "You have permanently denied microphone access. " +
-                                    "To use voice input on the widget, open Settings → " +
-                                    "Permissions → Microphone and enable it."
-                        )},
-                        confirmButton = {
-                            TextButton(onClick = {
-                                openAppPermissionSettings(this@MicPermissionActivity)
-                                finish()
-                            }) { Text("Open Settings") }
+                    PermissionDialog(
+                        title = "Microphone access blocked",
+                        text = "You have permanently denied microphone access. " +
+                                "To use voice input on the widget, open Settings → " +
+                                "Permissions → Microphone and enable it.",
+                        onConfirm = {
+                            openAppPermissionSettings(this@MicPermissionActivity)
+                            finish()
                         },
-                        dismissButton = {
-                            TextButton(onClick = { finish() }) { Text("Cancel") }
-                        }
+                        onDismiss = { finish() }
                     )
                 }
             }
