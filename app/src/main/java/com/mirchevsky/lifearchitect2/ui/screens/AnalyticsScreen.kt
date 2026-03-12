@@ -1,5 +1,11 @@
 package com.mirchevsky.lifearchitect2.ui.screens
 
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -10,12 +16,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -23,61 +30,182 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.EmojiObjects
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
-import com.mirchevsky.lifearchitect2.ui.theme.BrandGreen
-import com.mirchevsky.lifearchitect2.ui.theme.BrandOrange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.mirchevsky.lifearchitect2.data.CalendarEvent
 import com.mirchevsky.lifearchitect2.data.db.entity.TaskEntity
+import com.mirchevsky.lifearchitect2.permissions.PermissionGateState
+import com.mirchevsky.lifearchitect2.permissions.PermissionPrefs
+import com.mirchevsky.lifearchitect2.permissions.resolvePermissionGateState
+import com.mirchevsky.lifearchitect2.ui.theme.BrandGreen
+import com.mirchevsky.lifearchitect2.ui.theme.BrandOrange
 import com.mirchevsky.lifearchitect2.ui.viewmodel.AnalyticsViewModel
 import com.mirchevsky.lifearchitect2.ui.viewmodel.DayStatus
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 
+// Purple constant matching the app/widget theme
+private val Purple = Color(0xFF7B2FBE)
+
 @Composable
 fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
     val uiState by viewModel.uiState.collectAsState()
-    Box(modifier = Modifier
-        .fillMaxSize()
-        .statusBarsPadding()
+    val context = LocalContext.current
+    val permissionPrefs = remember(context) { PermissionPrefs(context) }
+
+    // ── Permission elevation loop ────────────────────────────────────────────
+    var showCalRationale by rememberSaveable { mutableStateOf(false) }
+    var showCalBlocked   by rememberSaveable { mutableStateOf(false) }
+
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.refreshCalendarPermission()
+        val state = resolvePermissionGateState(
+            context, Manifest.permission.READ_CALENDAR, permissionPrefs
+        )
+        when (state) {
+            PermissionGateState.RequestableWithRationale -> showCalRationale = true
+            PermissionGateState.PermanentlyDenied        -> showCalBlocked   = true
+            else                                         -> { /* granted or first-time handled */ }
+        }
+    }
+
+    fun requestCalendarPermission() {
+        val state = resolvePermissionGateState(
+            context, Manifest.permission.READ_CALENDAR, permissionPrefs
+        )
+        when (state) {
+            PermissionGateState.Granted -> viewModel.refreshCalendarPermission()
+            PermissionGateState.RequestableFirstTime,
+            PermissionGateState.RequestableWithRationale -> {
+                permissionPrefs.markRequested(Manifest.permission.READ_CALENDAR)
+                calendarPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.READ_CALENDAR,
+                        Manifest.permission.WRITE_CALENDAR
+                    )
+                )
+            }
+            PermissionGateState.PermanentlyDenied -> showCalBlocked = true
+        }
+    }
+
+    if (showCalRationale) {
+        AlertDialog(
+            onDismissRequest = { showCalRationale = false },
+            title = { Text("Calendar access needed") },
+            text  = { Text("Life Architect needs calendar access to show your device calendar events in the Analytics view.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCalRationale = false
+                    permissionPrefs.markRequested(Manifest.permission.READ_CALENDAR)
+                    calendarPermissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.READ_CALENDAR,
+                            Manifest.permission.WRITE_CALENDAR
+                        )
+                    )
+                }) { Text("Allow") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCalRationale = false }) { Text("Not now") }
+            }
+        )
+    }
+
+    if (showCalBlocked) {
+        AlertDialog(
+            onDismissRequest = { showCalBlocked = false },
+            title = { Text("Calendar access blocked") },
+            text  = { Text("You have permanently denied calendar access. To view device events, open Settings → Permissions → Calendar and enable it.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCalBlocked = false
+                    val intent = Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", context.packageName, null)
+                    )
+                    context.startActivity(intent)
+                }) { Text("Open Settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCalBlocked = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // ── Refresh permission state on every ON_RESUME ──────────────────────────
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshCalendarPermission()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
     ) {
         if (uiState.isLoading) {
             Box(
@@ -102,24 +230,28 @@ fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
                 item {
                     StatRow(
                         totalTasks = uiState.totalTasksCompleted,
-                        totalCalendarEvents = uiState.totalCalendarEvents
+                        totalCalendarEvents = uiState.totalCalendarEvents,
+                        hasCalendarPermission = uiState.hasCalendarPermission,
+                        onGrantCalendarAccess = { requestCalendarPermission() }
                     )
                 }
                 item {
                     YearlyTaskCalendar(
                         monthlyTaskStatus = uiState.monthlyTaskStatus,
+                        calendarEventDays = uiState.calendarEventDays,
                         selectedDay = uiState.selectedDay,
                         onDaySelected = { viewModel.selectDay(it) }
                     )
                 }
-                if (!uiState.isLoading) {
-                    item {
-                        DayDetailPanel(
-                            selectedDay = uiState.selectedDay,
-                            tasks = uiState.tasksForSelectedDay,
-                            onCompleteTask = { viewModel.completeTask(it) }
-                        )
-                    }
+                item {
+                    DayDetailPanel(
+                        selectedDay = uiState.selectedDay,
+                        tasks = uiState.tasksForSelectedDay,
+                        calendarEvents = uiState.calendarEventsForSelectedDay,
+                        hasCalendarPermission = uiState.hasCalendarPermission,
+                        onCompleteTask = { viewModel.completeTask(it) },
+                        onRequestCalendarPermission = { requestCalendarPermission() }
+                    )
                 }
                 item { CompletionChart(data = uiState.dailyCompletions, anchorDay = uiState.selectedDay) }
                 item { TipOfTheVisit() }
@@ -156,7 +288,6 @@ private fun UserProfileCard(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar placeholder
             Box(
                 modifier = Modifier
                     .size(56.dp)
@@ -199,7 +330,6 @@ private fun UserProfileCard(
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            // Streak badge
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
                     imageVector = Icons.Default.LocalFireDepartment,
@@ -225,18 +355,35 @@ private fun UserProfileCard(
 // Stat Row
 // ---------------------------------------------------------------------------
 @Composable
-private fun StatRow(totalTasks: Int, totalCalendarEvents: Int) {
+private fun StatRow(
+    totalTasks: Int,
+    totalCalendarEvents: Int,
+    hasCalendarPermission: Boolean,
+    onGrantCalendarAccess: () -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        StatCard(title = "Total Tasks", value = totalTasks.toString(), modifier = Modifier.weight(1f))
-        StatCard(title = "Calendar Events", value = totalCalendarEvents.toString(), modifier = Modifier.weight(1f))
+        StatCard(title = "Total Tasks", value = totalTasks.toString(), modifier = Modifier.weight(1f).height(88.dp))
+        StatCard(
+            title = "Calendar Events",
+            value = totalCalendarEvents.toString(),
+            modifier = Modifier.weight(1f).height(88.dp),
+            locked = !hasCalendarPermission,
+            onUnlock = onGrantCalendarAccess
+        )
     }
 }
 
 @Composable
-private fun StatCard(title: String, value: String, modifier: Modifier = Modifier) {
+private fun StatCard(
+    title: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    locked: Boolean = false,
+    onUnlock: (() -> Unit)? = null
+) {
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -244,193 +391,90 @@ private fun StatCard(title: String, value: String, modifier: Modifier = Modifier
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp, horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = value,
-                style = MaterialTheme.typography.headlineSmall,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Completion Chart — custom scrollable bar chart, no external library
-// ---------------------------------------------------------------------------
-@Composable
-private fun CompletionChart(data: Map<LocalDate, Int>, anchorDay: LocalDate = LocalDate.now()) {
-    // Build a 30-day window ending on anchorDay (anchorDay is the last/rightmost bar)
-    val windowDays = (29 downTo 0).map { anchorDay.minusDays(it.toLong()) }
-    val sortedEntries = windowDays.map { day -> day to (data[day] ?: 0) }
-    val maxCount = sortedEntries.maxOfOrNull { it.second } ?: 0
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "Tasks Completed in the Last 30 Days",
-                style = MaterialTheme.typography.titleMedium
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            if (maxCount == 0) {
-                Box(
+        if (locked) {
+            // ── Blurred permission state (same visual language as Device Calendar box) ──
+            // Outer Box matches the normal card content height so the card stays
+            // the same size as the Total Tasks card.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+                    .padding(vertical = 16.dp, horizontal = 8.dp)
+            ) {
+                // Blurred placeholder rows behind the overlay
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    contentAlignment = Alignment.Center
+                        .fillMaxSize()
+                        .blur(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        text = "No completed tasks yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.6f)
+                            .height(20.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.4f)
+                            .height(12.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
                     )
                 }
-            } else {
-                val barColor = MaterialTheme.colorScheme.primary
-                val chartHeight = 120.dp
-                val barWidth = 18.dp
-                val barGap = 8.dp
-                val scrollState = rememberScrollState()
-                val scope = rememberCoroutineScope()
-
-                // Scroll to the rightmost bar (anchorDay) whenever anchorDay changes
-                LaunchedEffect(anchorDay) {
-                    scrollState.scrollTo(scrollState.maxValue)
-                }
-
-                Row(
+                // Lock overlay
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(scrollState),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(barGap)
+                        .fillMaxSize()
+                        .background(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                            RoundedCornerShape(8.dp)
+                        ),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    sortedEntries.forEach { (date, count) ->
-                        val fraction = if (maxCount > 0) count.toFloat() / maxCount else 0f
-                        val filledHeight = (chartHeight * fraction).coerceAtLeast(if (count > 0) 4.dp else 0.dp)
-
-                        val badgeSize = 20.dp
-                        val badgeColor = MaterialTheme.colorScheme.inverseSurface
-                        val badgeTextColor = MaterialTheme.colorScheme.inverseOnSurface
-
-                        // Layout (top-to-bottom inside fixed chartHeight):
-                        //   [empty space]  [badge (20dp)]  [bar]  [4dp gap]  [day label]
-                        // Badge is always in the layout flow, so it never needs to overflow.
-                        val spaceAboveBadge = (chartHeight - filledHeight - badgeSize).coerceAtLeast(0.dp)
-
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.width(barWidth)
-                        ) {
-                            // Push badge+bar to the bottom of the chart area
-                            Spacer(modifier = Modifier.height(spaceAboveBadge))
-
-                            // Badge — shown only when count > 0, same height reserved always
-                            Box(
-                                modifier = Modifier.size(badgeSize),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (count > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(badgeSize)
-                                            .clip(CircleShape)
-                                            .background(badgeColor),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = count.toString(),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = badgeTextColor,
-                                            textAlign = TextAlign.Center,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Bar sits directly below the badge
-                            Box(
-                                modifier = Modifier
-                                    .width(barWidth)
-                                    .height(filledHeight)
-                                    .clip(CircleShape)
-                                    .background(barColor)
-                            )
-
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = date.format(DateTimeFormatter.ofPattern("d")),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                                modifier = Modifier.width(barWidth)
-                            )
-                        }
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = "Grant calendar access",
+                        tint = Purple,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Button(
+                        onClick = { onUnlock?.invoke() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Purple),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "Grant Access",
+                            fontSize = 11.sp,
+                            color = Color.White
+                        )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Draggable scrollbar track + thumb
-                val thumbColor = MaterialTheme.colorScheme.primary
-                val trackColor = MaterialTheme.colorScheme.surfaceVariant
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(CircleShape)
-                        .background(trackColor)
-                        .drawBehind {
-                            val maxScroll = scrollState.maxValue.toFloat()
-                            val current = scrollState.value.toFloat()
-                            if (maxScroll > 0f) {
-                                val thumbFraction = size.width / (size.width + maxScroll)
-                                val thumbWidth = size.width * thumbFraction
-                                val thumbX = (current / maxScroll) * (size.width - thumbWidth)
-                                drawRoundRect(
-                                    color = thumbColor,
-                                    topLeft = androidx.compose.ui.geometry.Offset(thumbX, 0f),
-                                    size = androidx.compose.ui.geometry.Size(thumbWidth, size.height),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2)
-                                )
-                            }
-                        }
-                        .pointerInput(scrollState.maxValue) {
-                            detectHorizontalDragGestures { _, dragAmount ->
-                                val maxScroll = scrollState.maxValue.toFloat()
-                                if (maxScroll > 0f) {
-                                    val thumbFraction = size.width / (size.width + maxScroll)
-                                    val scrollDelta = (dragAmount / (size.width * thumbFraction)) * maxScroll
-                                    scope.launch {
-                                        scrollState.scrollTo(
-                                            (scrollState.value + scrollDelta.toInt()).coerceIn(0, scrollState.maxValue)
-                                        )
-                                    }
-                                }
-                            }
-                        }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 16.dp, horizontal = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.headlineSmall,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -438,18 +482,141 @@ private fun CompletionChart(data: Map<LocalDate, Int>, anchorDay: LocalDate = Lo
 }
 
 // ---------------------------------------------------------------------------
-// Monthly Task Calendar — one card, navigates through all months of the year
+// Completion Chart (30-day bar chart)
+// ---------------------------------------------------------------------------
+@Composable
+private fun CompletionChart(
+    data: Map<LocalDate, Int>,
+    anchorDay: LocalDate
+) {
+    if (data.isEmpty()) return
+
+    val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
+
+    val sortedDays = data.keys.sortedDescending()
+    val maxVal = data.values.maxOrNull()?.coerceAtLeast(1) ?: 1
+    val barWidth = 20.dp
+    val barMaxHeight = 80.dp
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Last 30 Days",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(scrollState)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    modifier = Modifier.height(barMaxHeight + 24.dp)
+                ) {
+                    sortedDays.forEach { day ->
+                        val count = data[day] ?: 0
+                        val fraction = count.toFloat() / maxVal
+                        val isAnchor = day == anchorDay
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Bottom,
+                            modifier = Modifier.height(barMaxHeight + 24.dp)
+                        ) {
+                            if (count > 0) {
+                                Text(
+                                    text = count.toString(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Spacer(modifier = Modifier.height(16.dp))
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Box(
+                                modifier = Modifier
+                                    .width(barWidth)
+                                    .height((barMaxHeight.value * fraction.coerceAtLeast(0.05f)).dp)
+                                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                    .background(
+                                        if (isAnchor) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                                    )
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = day.dayOfMonth.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isAnchor) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.width(barWidth)
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            val thumbColor = MaterialTheme.colorScheme.primary
+            val trackColor = MaterialTheme.colorScheme.surfaceVariant
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(CircleShape)
+                    .background(trackColor)
+                    .drawBehind {
+                        val maxScroll = scrollState.maxValue.toFloat()
+                        val current = scrollState.value.toFloat()
+                        if (maxScroll > 0f) {
+                            val thumbFraction = size.width / (size.width + maxScroll)
+                            val thumbWidth = size.width * thumbFraction
+                            val thumbX = (current / maxScroll) * (size.width - thumbWidth)
+                            drawRoundRect(
+                                color = thumbColor,
+                                topLeft = androidx.compose.ui.geometry.Offset(thumbX, 0f),
+                                size = androidx.compose.ui.geometry.Size(thumbWidth, size.height),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2)
+                            )
+                        }
+                    }
+                    .pointerInput(scrollState.maxValue) {
+                        detectHorizontalDragGestures { _, dragAmount ->
+                            val maxScroll = scrollState.maxValue.toFloat()
+                            if (maxScroll > 0f) {
+                                val thumbFraction = size.width / (size.width + maxScroll)
+                                val scrollDelta = (dragAmount / (size.width * thumbFraction)) * maxScroll
+                                scope.launch {
+                                    scrollState.scrollTo(
+                                        (scrollState.value + scrollDelta.toInt()).coerceIn(0, scrollState.maxValue)
+                                    )
+                                }
+                            }
+                        }
+                    }
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Monthly Task Calendar
 // ---------------------------------------------------------------------------
 @Composable
 private fun YearlyTaskCalendar(
     monthlyTaskStatus: Map<LocalDate, DayStatus>,
+    calendarEventDays: Set<LocalDate> = emptySet(),
     selectedDay: LocalDate?,
     onDaySelected: (LocalDate) -> Unit
 ) {
     val today = LocalDate.now()
     var currentMonth by remember { mutableStateOf(YearMonth.now()) }
     val currentYear = today.year
-
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -458,8 +625,6 @@ private fun YearlyTaskCalendar(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-
-            // Month navigation header — constrained to current year, wraps around
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -490,13 +655,12 @@ private fun YearlyTaskCalendar(
                     Icon(Icons.Default.ChevronRight, contentDescription = "Next month")
                 }
             }
-
             Spacer(modifier = Modifier.height(8.dp))
-
             MonthBlock(
                 month = currentMonth,
                 today = today,
                 monthlyTaskStatus = monthlyTaskStatus,
+                calendarEventDays = calendarEventDays,
                 selectedDay = selectedDay,
                 onDaySelected = onDaySelected
             )
@@ -509,12 +673,11 @@ private fun MonthBlock(
     month: YearMonth,
     today: LocalDate,
     monthlyTaskStatus: Map<LocalDate, DayStatus>,
+    calendarEventDays: Set<LocalDate> = emptySet(),
     selectedDay: LocalDate?,
     onDaySelected: (LocalDate) -> Unit
 ) {
     Column {
-
-        // Day-of-week headers (Mon–Sun)
         val dayHeaders = DayOfWeek.values().map {
             it.getDisplayName(TextStyle.NARROW, Locale.getDefault())
         }
@@ -533,7 +696,7 @@ private fun MonthBlock(
         Spacer(modifier = Modifier.height(2.dp))
 
         val firstDayOfMonth = month.atDay(1)
-        val startOffset = firstDayOfMonth.dayOfWeek.value - 1 // Monday = 0
+        val startOffset = firstDayOfMonth.dayOfWeek.value - 1
         val daysInMonth = month.lengthOfMonth()
         val totalCells = startOffset + daysInMonth
         val gridSize = if (totalCells % 7 == 0) totalCells else totalCells + (7 - totalCells % 7)
@@ -590,7 +753,8 @@ private fun MonthBlock(
                                 }
                             )
                         }
-                        if (status != null) {
+                        val hasCalEvent = date in calendarEventDays
+                        if (status != null || hasCalEvent) {
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                                 modifier = Modifier.padding(top = 1.dp)
@@ -611,6 +775,14 @@ private fun MonthBlock(
                                             .background(MaterialTheme.colorScheme.error)
                                     )
                                 }
+                                if (hasCalEvent) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primary)
+                                    )
+                                }
                             }
                         }
                     }
@@ -621,14 +793,16 @@ private fun MonthBlock(
 }
 
 // ---------------------------------------------------------------------------
-// Day Detail Panel — replaces Due Date Performance
-// Shows pending tasks for the selected calendar day, completable in-place.
+// Day Detail Panel — app tasks + device calendar events for selected day
 // ---------------------------------------------------------------------------
 @Composable
 private fun DayDetailPanel(
     selectedDay: LocalDate,
     tasks: List<TaskEntity>,
-    onCompleteTask: (TaskEntity) -> Unit
+    calendarEvents: List<CalendarEvent>,
+    hasCalendarPermission: Boolean,
+    onCompleteTask: (TaskEntity) -> Unit,
+    onRequestCalendarPermission: () -> Unit
 ) {
     val formatter = DateTimeFormatter.ofPattern("EEEE, MMMM d")
     val zone = ZoneId.systemDefault()
@@ -647,6 +821,7 @@ private fun DayDetailPanel(
             )
             Spacer(modifier = Modifier.height(12.dp))
 
+            // ── App tasks section ────────────────────────────────────────────
             if (tasks.isEmpty()) {
                 Text(
                     text = "No tasks scheduled for this day.",
@@ -732,6 +907,152 @@ private fun DayDetailPanel(
                     }
                 }
             }
+
+            // ── Device calendar events section ───────────────────────────────
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CalendarToday,
+                    contentDescription = null,
+                    tint = Purple,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "Device Calendar",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (!hasCalendarPermission) {
+                // ── Blurred locked state ─────────────────────────────────────
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp)
+                ) {
+                    // Blurred placeholder content behind the lock overlay
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .blur(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        repeat(3) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(24.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            )
+                        }
+                    }
+                    // Lock overlay
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                                RoundedCornerShape(8.dp)
+                            ),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Calendar locked",
+                            tint = Purple,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Calendar access required",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = onRequestCalendarPermission,
+                            colors = ButtonDefaults.buttonColors(containerColor = Purple),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "Grant Access",
+                                fontSize = 12.sp,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            } else if (calendarEvents.isEmpty()) {
+                Text(
+                    text = "No calendar events for this day.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    calendarEvents.forEach { event ->
+                        CalendarEventRow(event = event, zone = zone)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarEventRow(event: CalendarEvent, zone: ZoneId) {
+    val timeFormatter = DateTimeFormatter.ofPattern("h:mm a")
+    val startTime = if (event.isAllDay) {
+        "All day"
+    } else {
+        LocalTime.ofInstant(
+            java.time.Instant.ofEpochMilli(event.startMillis), zone
+        ).format(timeFormatter)
+    }
+
+    // Use the event's calendar colour as a left-side accent strip
+    val accentColor = if (event.color != 0) Color(event.color) else Purple
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Colour strip
+        Box(
+            modifier = Modifier
+                .width(4.dp)
+                .height(36.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(accentColor)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = event.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = startTime,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -754,7 +1075,6 @@ private val APP_TIPS = listOf(
 
 @Composable
 private fun TipOfTheVisit() {
-    // Pick a new random tip each time this composable enters composition (i.e. each tab visit)
     val tip = remember { APP_TIPS.random() }
 
     Card(

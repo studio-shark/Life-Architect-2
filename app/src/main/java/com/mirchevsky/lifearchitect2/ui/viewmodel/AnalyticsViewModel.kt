@@ -1,18 +1,28 @@
 package com.mirchevsky.lifearchitect2.ui.viewmodel
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mirchevsky.lifearchitect2.data.AppRepository
+import com.mirchevsky.lifearchitect2.data.CalendarEvent
+import com.mirchevsky.lifearchitect2.data.DeviceCalendarRepository
 import com.mirchevsky.lifearchitect2.data.db.entity.TaskEntity
 import com.mirchevsky.lifearchitect2.data.db.entity.UserEntity
 import com.mirchevsky.lifearchitect2.domain.TaskDifficulty
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.temporal.WeekFields
 import java.util.Locale
@@ -41,10 +51,19 @@ data class AnalyticsUiState(
     // Day-detail panel
     val selectedDay: LocalDate = LocalDate.now(),
     val tasksForSelectedDay: List<TaskEntity> = emptyList(),
+    // Device calendar
+    val calendarEventsForSelectedDay: List<CalendarEvent> = emptyList(),
+    val calendarEventDays: Set<LocalDate> = emptySet(),
+    val totalDeviceCalendarEvents: Int = 0,
+    val hasCalendarPermission: Boolean = false,
     val isLoading: Boolean = true
 )
 
-class AnalyticsViewModel(private val repository: AppRepository) : ViewModel() {
+@OptIn(ExperimentalCoroutinesApi::class)
+class AnalyticsViewModel(
+    private val repository: AppRepository,
+    private val appContext: Context
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AnalyticsUiState())
     val uiState: StateFlow<AnalyticsUiState> = _uiState
@@ -52,7 +71,14 @@ class AnalyticsViewModel(private val repository: AppRepository) : ViewModel() {
     // Separate flow for the selected day so any change triggers a reactive recompute
     private val _selectedDay = MutableStateFlow(LocalDate.now())
 
+    // Tracks whether READ_CALENDAR permission is currently granted.
+    // Refreshed by the UI on resume and after any permission result.
+    private val _hasCalendarPermission = MutableStateFlow(checkCalendarPermission())
+
+    private val deviceCalendarRepo = DeviceCalendarRepository(appContext)
+
     init {
+        // ── Task-based state ────────────────────────────────────────────────
         viewModelScope.launch {
             combine(
                 repository.observeUser("local_user"),
@@ -98,7 +124,6 @@ class AnalyticsViewModel(private val repository: AppRepository) : ViewModel() {
                     it.dueDate != null && it.completedAt != null && it.completedAt > it.dueDate
                 }
 
-                // Dots are based on the task's scheduled (due) date, not completion timestamp
                 val completedDays = completedTasks
                     .filter { it.dueDate != null }
                     .map { Instant.ofEpochMilli(it.dueDate!!).atZone(zone).toLocalDate() }
@@ -123,22 +148,16 @@ class AnalyticsViewModel(private val repository: AppRepository) : ViewModel() {
                     }
                 }
 
-                // Always honour the user-tapped day. Only auto-select on first load
-                // (when _selectedDay is still the default LocalDate.now()).
                 val resolvedDay = if (allDays.contains(selectedDay)) {
-                    // User tapped a real day — always show it
                     selectedDay
                 } else if (selectedDay == now) {
-                    // Default: pick the next upcoming booked day, or the most recent past one
                     allDays.filter { it >= now }.minOrNull()
                         ?: allDays.maxOrNull()
                         ?: selectedDay
                 } else {
-                    // User tapped a day with no tasks — show it anyway (panel will say "no tasks")
                     selectedDay
                 }
 
-                // Show both pending and completed tasks for the resolved day
                 val pendingForDay = pendingTasks.filter { task ->
                     task.dueDate != null &&
                             Instant.ofEpochMilli(task.dueDate).atZone(zone).toLocalDate() == resolvedDay
@@ -149,13 +168,15 @@ class AnalyticsViewModel(private val repository: AppRepository) : ViewModel() {
                 }
                 val tasksForDay = pendingForDay + completedForDay
 
+                // Preserve existing calendar events and permission state while task state updates
+                val current = _uiState.value
                 AnalyticsUiState(
                     userName = user.name,
                     level = user.level,
                     xp = user.xp,
                     dailyStreak = user.dailyStreak,
                     totalTasksCompleted = completedTasks.size + pendingTasks.size,
-                    totalCalendarEvents = totalCalendarEvents,
+                    totalCalendarEvents = current.totalDeviceCalendarEvents,
                     dailyCompletions = dailyCompletions,
                     monthlyTaskStatus = monthlyStatus,
                     onTimeCompletions = onTime,
@@ -164,17 +185,74 @@ class AnalyticsViewModel(private val repository: AppRepository) : ViewModel() {
                     bestWeek = bestWeek,
                     selectedDay = resolvedDay,
                     tasksForSelectedDay = tasksForDay,
+                    calendarEventsForSelectedDay = current.calendarEventsForSelectedDay,
+                    calendarEventDays = current.calendarEventDays,
+                    totalDeviceCalendarEvents = current.totalDeviceCalendarEvents,
+                    hasCalendarPermission = current.hasCalendarPermission,
                     isLoading = false
                 )
             }.collect { state ->
                 _uiState.value = state
             }
         }
+
+        // ── Device calendar events for selected day ──────────────────────────
+        viewModelScope.launch {
+            combine(_selectedDay, _hasCalendarPermission) { day, hasPerm ->
+                day to hasPerm
+            }.flatMapLatest { (day, hasPerm) ->
+                if (hasPerm) deviceCalendarRepo.observeEventsForDate(day)
+                else flowOf(emptyList())
+            }.collect { events ->
+                _uiState.value = _uiState.value.copy(
+                    calendarEventsForSelectedDay = events,
+                    hasCalendarPermission = _hasCalendarPermission.value
+                )
+            }
+        }
+
+        // ── Calendar event days for month grid dots ───────────────────────────
+        viewModelScope.launch {
+            _hasCalendarPermission.flatMapLatest { hasPerm ->
+                if (hasPerm) deviceCalendarRepo.observeEventDaysForMonth(YearMonth.now())
+                else flowOf(emptySet())
+            }.collect { days ->
+                _uiState.value = _uiState.value.copy(calendarEventDays = days)
+            }
+        }
+
+        // ── Total device calendar event count ────────────────────────────────
+        viewModelScope.launch {
+            _hasCalendarPermission.flatMapLatest { hasPerm ->
+                if (hasPerm) deviceCalendarRepo.observeTotalEventCount()
+                else flowOf(0)
+            }.collect { count ->
+                _uiState.value = _uiState.value.copy(
+                    totalDeviceCalendarEvents = count,
+                    totalCalendarEvents = count
+                )
+            }
+        }
     }
+
+    // ── Public API ───────────────────────────────────────────────────────────
 
     /** Called when the user taps a day in the calendar. */
     fun selectDay(date: LocalDate) {
         _selectedDay.value = date
+    }
+
+    /**
+     * Called by the UI after a permission result or on screen resume.
+     * Re-evaluates READ_CALENDAR permission and triggers a calendar reload if needed.
+     */
+    fun refreshCalendarPermission() {
+        val granted = checkCalendarPermission()
+        if (_hasCalendarPermission.value != granted) {
+            _hasCalendarPermission.value = granted
+        }
+        // Always sync the UI state flag so the locked overlay reacts immediately
+        _uiState.value = _uiState.value.copy(hasCalendarPermission = granted)
     }
 
     /** Complete a task from the Analytics screen — full XP logic identical to MainViewModel. */
@@ -245,6 +323,13 @@ class AnalyticsViewModel(private val repository: AppRepository) : ViewModel() {
         repository.updateTask(task.copy(isCompleted = true, status = "completed", completedAt = now))
         repository.updateUser(finalUser)
     }
+
+    // ── Private helpers ──────────────────────────────────────────────────────
+
+    private fun checkCalendarPermission(): Boolean =
+        ContextCompat.checkSelfPermission(
+            appContext, Manifest.permission.READ_CALENDAR
+        ) == PackageManager.PERMISSION_GRANTED
 
     private fun updateStreak(user: UserEntity, todayEpochDay: Long): UserEntity {
         val yesterday = todayEpochDay - 1

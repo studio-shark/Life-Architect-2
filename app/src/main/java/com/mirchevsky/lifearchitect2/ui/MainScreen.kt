@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,8 +64,9 @@ fun MainScreen(viewModel: MainViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val density = LocalDensity.current
 
+    val context = LocalContext.current
     val analyticsViewModel: AnalyticsViewModel = viewModel(
-        factory = AnalyticsViewModelFactory(viewModel.repository)
+        factory = AnalyticsViewModelFactory(viewModel.repository, context.applicationContext)
     )
 
     // Flag that tells TasksScreen to focus the add-task field

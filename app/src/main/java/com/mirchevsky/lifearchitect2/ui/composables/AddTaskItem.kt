@@ -12,6 +12,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -30,6 +31,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -42,7 +45,10 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DatePickerDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -52,9 +58,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.SelectableDates
-import androidx.compose.material3.TimeInput
 import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -62,6 +66,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -74,10 +79,15 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
@@ -696,20 +706,97 @@ fun AddTaskItem(
             }
         )
 
-        DatePickerDialog(
+        Dialog(
             onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingDateMillis = datePickerState.selectedDateMillis
-                    showDatePicker = false
-                    showTimePicker = true
-                }) { Text("Next") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
-            }
+            properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
-            DatePicker(state = datePickerState)
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp, bottom = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    DatePicker(
+                        state = datePickerState,
+                        modifier = Modifier.fillMaxWidth(),
+                        title = null,
+                        headline = null,
+                        showModeToggle = false,
+                        colors = DatePickerDefaults.colors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            dayContentColor = MaterialTheme.colorScheme.onSurface,
+                            selectedDayContainerColor = Purple,
+                            selectedDayContentColor = Color.White,
+                            todayContentColor = MaterialTheme.colorScheme.onSurface,
+                            todayDateBorderColor = Purple,
+                            weekdayContentColor = MaterialTheme.colorScheme.onSurface,
+                            navigationContentColor = MaterialTheme.colorScheme.onSurface,
+                            subheadContentColor = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = { showDatePicker = false },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White,
+                                contentColor = Purple
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                        ) {
+                            Text(
+                                "Back",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                maxLines = 1
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                pendingDateMillis = datePickerState.selectedDateMillis
+                                showDatePicker = false
+                                showTimePicker = true
+                            },
+                            enabled = datePickerState.selectedDateMillis != null,
+                            modifier = Modifier
+                                .weight(2f)
+                                .height(50.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Purple,
+                                contentColor = Color.White
+                            ),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                "Next: Set Time",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -717,55 +804,176 @@ fun AddTaskItem(
 
     if (showTimePicker) {
         val parsedTime = parseResult?.bestGuess
-        val timePickerState = rememberTimePickerState(
-            initialHour = parsedTime?.hour ?: 9,
-            initialMinute = parsedTime?.minute ?: 0,
-            is24Hour = true
-        )
+        var isAllDay by remember { mutableStateOf(false) }
+        var hour by remember { mutableStateOf(parsedTime?.hour ?: 9) }
+        var minute by remember { mutableStateOf(parsedTime?.minute ?: 0) }
 
-        Dialog(onDismissRequest = { showTimePicker = false }) {
+        Dialog(
+            onDismissRequest = { showTimePicker = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
             Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        text = "Select time",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier
-                            .align(Alignment.Start)
-                            .padding(bottom = 16.dp)
-                    )
-
-                    TimeInput(state = timePickerState)
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
+                    // All-day toggle
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(onClick = { showTimePicker = false }) {
-                            Text("Cancel")
+                        Text(
+                            "All-day event",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Switch(
+                            checked = isAllDay,
+                            onCheckedChange = { isAllDay = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Purple,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.onSurface,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        )
+                    }
+
+                    // Time input — hidden when all-day
+                    AnimatedVisibility(visible = !isAllDay) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Spacer(Modifier.height(24.dp))
+                            val customTextSelectionColors = TextSelectionColors(
+                                handleColor = Color.White,
+                                backgroundColor = Color.White.copy(alpha = 0.4f)
+                            )
+                            CompositionLocalProvider(LocalTextSelectionColors provides customTextSelectionColors) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Hour field
+                                    BasicTextField(
+                                        value = hour.toString().padStart(2, '0'),
+                                        onValueChange = { v ->
+                                            hour = v.filter { it.isDigit() }.take(2).toIntOrNull()?.coerceIn(0, 23) ?: 0
+                                        },
+                                        textStyle = TextStyle(
+                                            color = Color.White,
+                                            fontSize = 48.sp,
+                                            textAlign = TextAlign.Center
+                                        ),
+                                        modifier = Modifier
+                                            .width(110.dp)
+                                            .height(80.dp)
+                                            .background(Purple, RoundedCornerShape(12.dp))
+                                            .padding(8.dp),
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Number
+                                        ),
+                                        cursorBrush = SolidColor(Color.White)
+                                    )
+                                    Spacer(Modifier.width(16.dp))
+                                    // Minute field
+                                    BasicTextField(
+                                        value = minute.toString().padStart(2, '0'),
+                                        onValueChange = { v ->
+                                            minute = v.filter { it.isDigit() }.take(2).toIntOrNull()?.coerceIn(0, 59) ?: 0
+                                        },
+                                        textStyle = TextStyle(
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontSize = 48.sp,
+                                            textAlign = TextAlign.Center
+                                        ),
+                                        modifier = Modifier
+                                            .width(110.dp)
+                                            .height(80.dp)
+                                            .background(
+                                                MaterialTheme.colorScheme.surfaceVariant,
+                                                RoundedCornerShape(12.dp)
+                                            )
+                                            .padding(8.dp),
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Number
+                                        ),
+                                        cursorBrush = SolidColor(Color.White)
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(24.dp))
                         }
-                        TextButton(onClick = {
-                            showTimePicker = false
-                            val dateMillis = pendingDateMillis ?: return@TextButton
-                            val dueDate = Instant.ofEpochMilli(dateMillis)
-                                .atZone(ZoneId.systemDefault())
-                                .toLocalDateTime()
-                                .withHour(timePickerState.hour)
-                                .withMinute(timePickerState.minute)
-                                .withSecond(0)
-                            submitWithCalendar(dueDate)
-                        }) {
-                            Text("Confirm")
+                    }
+
+                    if (isAllDay) Spacer(Modifier.height(24.dp))
+
+                    // Bottom buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = { showTimePicker = false },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White,
+                                contentColor = Purple
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                        ) {
+                            Text("Back", fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1)
+                        }
+                        Button(
+                            onClick = {
+                                showTimePicker = false
+                                val dateMillis = pendingDateMillis ?: return@Button
+                                val dueDate = if (isAllDay) {
+                                    Instant.ofEpochMilli(dateMillis)
+                                        .atZone(ZoneId.systemDefault())
+                                        .toLocalDateTime()
+                                        .withHour(0)
+                                        .withMinute(0)
+                                        .withSecond(0)
+                                } else {
+                                    Instant.ofEpochMilli(dateMillis)
+                                        .atZone(ZoneId.systemDefault())
+                                        .toLocalDateTime()
+                                        .withHour(hour)
+                                        .withMinute(minute)
+                                        .withSecond(0)
+                                }
+                                submitWithCalendar(dueDate)
+                            },
+                            modifier = Modifier
+                                .weight(2f)
+                                .height(50.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Purple,
+                                contentColor = Color.White
+                            ),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                "Create Event",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                maxLines = 1
+                            )
                         }
                     }
                 }
