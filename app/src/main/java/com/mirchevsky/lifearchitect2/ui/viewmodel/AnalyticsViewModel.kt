@@ -56,6 +56,7 @@ data class AnalyticsUiState(
     val calendarEventDays: Set<LocalDate> = emptySet(),
     val totalDeviceCalendarEvents: Int = 0,
     val hasCalendarPermission: Boolean = false,
+    val hasCalendarWritePermission: Boolean = false,
     val isLoading: Boolean = true
 )
 
@@ -73,7 +74,8 @@ class AnalyticsViewModel(
 
     // Tracks whether READ_CALENDAR permission is currently granted.
     // Refreshed by the UI on resume and after any permission result.
-    private val _hasCalendarPermission = MutableStateFlow(checkCalendarPermission())
+    private val _hasCalendarPermission = MutableStateFlow(checkCalendarReadPermission())
+    private val _hasCalendarWritePermission = MutableStateFlow(checkCalendarWritePermission())
 
     private val deviceCalendarRepo = DeviceCalendarRepository(appContext)
 
@@ -189,6 +191,7 @@ class AnalyticsViewModel(
                     calendarEventDays = current.calendarEventDays,
                     totalDeviceCalendarEvents = current.totalDeviceCalendarEvents,
                     hasCalendarPermission = current.hasCalendarPermission,
+                    hasCalendarWritePermission = current.hasCalendarWritePermission,
                     isLoading = false
                 )
             }.collect { state ->
@@ -206,7 +209,8 @@ class AnalyticsViewModel(
             }.collect { events ->
                 _uiState.value = _uiState.value.copy(
                     calendarEventsForSelectedDay = events,
-                    hasCalendarPermission = _hasCalendarPermission.value
+                    hasCalendarPermission = _hasCalendarPermission.value,
+                    hasCalendarWritePermission = _hasCalendarWritePermission.value
                 )
             }
         }
@@ -247,12 +251,44 @@ class AnalyticsViewModel(
      * Re-evaluates READ_CALENDAR permission and triggers a calendar reload if needed.
      */
     fun refreshCalendarPermission() {
-        val granted = checkCalendarPermission()
-        if (_hasCalendarPermission.value != granted) {
-            _hasCalendarPermission.value = granted
+        val readGranted = checkCalendarReadPermission()
+        if (_hasCalendarPermission.value != readGranted) {
+            _hasCalendarPermission.value = readGranted
         }
+        val writeGranted = checkCalendarWritePermission()
+        if (_hasCalendarWritePermission.value != writeGranted) {
+            _hasCalendarWritePermission.value = writeGranted
+        }
+
         // Always sync the UI state flag so the locked overlay reacts immediately
-        _uiState.value = _uiState.value.copy(hasCalendarPermission = granted)
+        _uiState.value = _uiState.value.copy(
+            hasCalendarPermission = readGranted,
+            hasCalendarWritePermission = writeGranted
+        )
+    }
+
+    fun updateCalendarEvent(
+        eventId: Long,
+        title: String,
+        startMillis: Long,
+        endMillis: Long,
+        isAllDay: Boolean
+    ) = viewModelScope.launch {
+        if (!_hasCalendarPermission.value || !_hasCalendarWritePermission.value) return@launch
+        deviceCalendarRepo.updateEvent(
+            eventId,
+            DeviceCalendarRepository.EventUpdate(
+                title = title,
+                startMillis = startMillis,
+                endMillis = endMillis,
+                isAllDay = isAllDay
+            )
+        )
+    }
+
+    fun deleteCalendarEvent(eventId: Long) = viewModelScope.launch {
+        if (!_hasCalendarPermission.value || !_hasCalendarWritePermission.value) return@launch
+        deviceCalendarRepo.deleteEvent(eventId)
     }
 
     /** Complete a task from the Analytics screen — full XP logic identical to MainViewModel. */
@@ -324,11 +360,16 @@ class AnalyticsViewModel(
         repository.updateUser(finalUser)
     }
 
-    // ── Private helpers ──────────────────────────────────────────────────────
+    // ── Private helpers ─────────────────────────────────────────────────────
 
-    private fun checkCalendarPermission(): Boolean =
+    private fun checkCalendarReadPermission(): Boolean =
         ContextCompat.checkSelfPermission(
             appContext, Manifest.permission.READ_CALENDAR
+        ) == PackageManager.PERMISSION_GRANTED
+
+    private fun checkCalendarWritePermission(): Boolean =
+        ContextCompat.checkSelfPermission(
+            appContext, Manifest.permission.WRITE_CALENDAR
         ) == PackageManager.PERMISSION_GRANTED
 
     private fun updateStreak(user: UserEntity, todayEpochDay: Long): UserEntity {

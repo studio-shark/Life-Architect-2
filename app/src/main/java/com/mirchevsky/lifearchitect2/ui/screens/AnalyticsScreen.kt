@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.mirchevsky.lifearchitect2.ui.screens
 
 import android.Manifest
@@ -35,6 +37,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiObjects
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LocalFireDepartment
@@ -47,6 +51,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,6 +61,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -61,8 +71,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -88,29 +98,29 @@ import com.mirchevsky.lifearchitect2.ui.theme.BrandGreen
 import com.mirchevsky.lifearchitect2.ui.theme.BrandOrange
 import com.mirchevsky.lifearchitect2.ui.viewmodel.AnalyticsViewModel
 import com.mirchevsky.lifearchitect2.ui.viewmodel.DayStatus
-import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlinx.coroutines.launch
 
-// Purple constant matching the app/widget theme
 private val Purple = Color(0xFF7B2FBE)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val permissionPrefs = remember(context) { PermissionPrefs(context) }
 
-    // ── Permission elevation loop ────────────────────────────────────────────
     var showCalRationale by rememberSaveable { mutableStateOf(false) }
-    var showCalBlocked   by rememberSaveable { mutableStateOf(false) }
+    var showCalBlocked by rememberSaveable { mutableStateOf(false) }
 
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -121,8 +131,8 @@ fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
         )
         when (state) {
             PermissionGateState.RequestableWithRationale -> showCalRationale = true
-            PermissionGateState.PermanentlyDenied        -> showCalBlocked   = true
-            else                                         -> { /* granted or first-time handled */ }
+            PermissionGateState.PermanentlyDenied -> showCalBlocked = true
+            else -> {}
         }
     }
 
@@ -150,7 +160,9 @@ fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
         AlertDialog(
             onDismissRequest = { showCalRationale = false },
             title = { Text("Calendar access needed") },
-            text  = { Text("Life Architect needs calendar access to show your device calendar events in the Analytics view.") },
+            text = {
+                Text("Life Architect needs calendar access to show your device calendar events in the Analytics view.")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     showCalRationale = false
@@ -173,7 +185,9 @@ fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
         AlertDialog(
             onDismissRequest = { showCalBlocked = false },
             title = { Text("Calendar access blocked") },
-            text  = { Text("You have permanently denied calendar access. To view device events, open Settings → Permissions → Calendar and enable it.") },
+            text = {
+                Text("You have permanently denied calendar access. To view device events, open Settings → Permissions → Calendar and enable it.")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     showCalBlocked = false
@@ -190,7 +204,6 @@ fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
         )
     }
 
-    // ── Refresh permission state on every ON_RESUME ──────────────────────────
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -249,7 +262,18 @@ fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
                         tasks = uiState.tasksForSelectedDay,
                         calendarEvents = uiState.calendarEventsForSelectedDay,
                         hasCalendarPermission = uiState.hasCalendarPermission,
+                        hasCalendarWritePermission = uiState.hasCalendarWritePermission,
                         onCompleteTask = { viewModel.completeTask(it) },
+                        onEditCalendarEvent = { eventId, title, startMillis, endMillis, isAllDay ->
+                            viewModel.updateCalendarEvent(
+                                eventId = eventId,
+                                title = title,
+                                startMillis = startMillis,
+                                endMillis = endMillis,
+                                isAllDay = isAllDay
+                            )
+                        },
+                        onDeleteCalendarEvent = { viewModel.deleteCalendarEvent(it) },
                         onRequestCalendarPermission = { requestCalendarPermission() }
                     )
                 }
@@ -259,10 +283,6 @@ fun AnalyticsScreen(viewModel: AnalyticsViewModel) {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// User Profile Card
-// ---------------------------------------------------------------------------
 
 private fun xpForNextLevel(level: Int): Int = 100 * level
 
@@ -351,9 +371,6 @@ private fun UserProfileCard(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Stat Row
-// ---------------------------------------------------------------------------
 @Composable
 private fun StatRow(
     totalTasks: Int,
@@ -365,7 +382,11 @@ private fun StatRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        StatCard(title = "Total Tasks", value = totalTasks.toString(), modifier = Modifier.weight(1f).height(88.dp))
+        StatCard(
+            title = "Total Tasks",
+            value = totalTasks.toString(),
+            modifier = Modifier.weight(1f).height(88.dp)
+        )
         StatCard(
             title = "Calendar Events",
             value = totalCalendarEvents.toString(),
@@ -392,16 +413,12 @@ private fun StatCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         if (locked) {
-            // ── Blurred permission state (same visual language as Device Calendar box) ──
-            // Outer Box matches the normal card content height so the card stays
-            // the same size as the Total Tasks card.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight()
                     .padding(vertical = 16.dp, horizontal = 8.dp)
             ) {
-                // Blurred placeholder rows behind the overlay
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -424,7 +441,7 @@ private fun StatCard(
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                     )
                 }
-                // Lock overlay
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -481,9 +498,6 @@ private fun StatCard(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Completion Chart (30-day bar chart)
-// ---------------------------------------------------------------------------
 @Composable
 private fun CompletionChart(
     data: Map<LocalDate, Int>,
@@ -604,9 +618,6 @@ private fun CompletionChart(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Monthly Task Calendar
-// ---------------------------------------------------------------------------
 @Composable
 private fun YearlyTaskCalendar(
     monthlyTaskStatus: Map<LocalDate, DayStatus>,
@@ -617,6 +628,7 @@ private fun YearlyTaskCalendar(
     val today = LocalDate.now()
     var currentMonth by remember { mutableStateOf(YearMonth.now()) }
     val currentYear = today.year
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -632,30 +644,36 @@ private fun YearlyTaskCalendar(
             ) {
                 IconButton(
                     onClick = {
-                        currentMonth = if (currentMonth.monthValue == 1)
+                        currentMonth = if (currentMonth.monthValue == 1) {
                             YearMonth.of(currentYear, 12)
-                        else
+                        } else {
                             currentMonth.minusMonths(1)
+                        }
                     }
                 ) {
                     Icon(Icons.Default.ChevronLeft, contentDescription = "Previous month")
                 }
+
                 Text(
                     text = currentMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy")),
                     style = MaterialTheme.typography.titleMedium
                 )
+
                 IconButton(
                     onClick = {
-                        currentMonth = if (currentMonth.monthValue == 12)
+                        currentMonth = if (currentMonth.monthValue == 12) {
                             YearMonth.of(currentYear, 1)
-                        else
+                        } else {
                             currentMonth.plusMonths(1)
+                        }
                     }
                 ) {
                     Icon(Icons.Default.ChevronRight, contentDescription = "Next month")
                 }
             }
+
             Spacer(modifier = Modifier.height(8.dp))
+
             MonthBlock(
                 month = currentMonth,
                 today = today,
@@ -681,6 +699,7 @@ private fun MonthBlock(
         val dayHeaders = DayOfWeek.values().map {
             it.getDisplayName(TextStyle.NARROW, Locale.getDefault())
         }
+
         Row(modifier = Modifier.fillMaxWidth()) {
             dayHeaders.forEach { label ->
                 Text(
@@ -753,6 +772,7 @@ private fun MonthBlock(
                                 }
                             )
                         }
+
                         val hasCalEvent = date in calendarEventDays
                         if (status != null || hasCalEvent) {
                             Row(
@@ -792,16 +812,16 @@ private fun MonthBlock(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Day Detail Panel — app tasks + device calendar events for selected day
-// ---------------------------------------------------------------------------
 @Composable
 private fun DayDetailPanel(
     selectedDay: LocalDate,
     tasks: List<TaskEntity>,
     calendarEvents: List<CalendarEvent>,
     hasCalendarPermission: Boolean,
+    hasCalendarWritePermission: Boolean,
     onCompleteTask: (TaskEntity) -> Unit,
+    onEditCalendarEvent: (Long, String, Long, Long, Boolean) -> Unit,
+    onDeleteCalendarEvent: (Long) -> Unit,
     onRequestCalendarPermission: () -> Unit
 ) {
     val formatter = DateTimeFormatter.ofPattern("EEEE, MMMM d")
@@ -821,7 +841,6 @@ private fun DayDetailPanel(
             )
             Spacer(modifier = Modifier.height(12.dp))
 
-            // ── App tasks section ────────────────────────────────────────────
             if (tasks.isEmpty()) {
                 Text(
                     text = "No tasks scheduled for this day.",
@@ -855,7 +874,11 @@ private fun DayDetailPanel(
                             ) {
                                 Checkbox(
                                     checked = isCompleted,
-                                    onCheckedChange = if (!isCompleted) { _ -> onCompleteTask(task) } else null,
+                                    onCheckedChange = if (!isCompleted) {
+                                        { _ -> onCompleteTask(task) }
+                                    } else {
+                                        null
+                                    },
                                     colors = CheckboxDefaults.colors(
                                         uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                         checkedColor = MaterialTheme.colorScheme.primary,
@@ -869,10 +892,11 @@ private fun DayDetailPanel(
                                         style = MaterialTheme.typography.bodyLarge.copy(
                                             textDecoration = if (isCompleted) TextDecoration.LineThrough else TextDecoration.None
                                         ),
-                                        color = if (isCompleted)
+                                        color = if (isCompleted) {
                                             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                                        else
+                                        } else {
                                             MaterialTheme.colorScheme.onSurface
+                                        }
                                     )
                                     if (dueDate != null) {
                                         val label = dueDate.format(DateTimeFormatter.ofPattern("MMM d"))
@@ -908,7 +932,6 @@ private fun DayDetailPanel(
                 }
             }
 
-            // ── Device calendar events section ───────────────────────────────
             Spacer(modifier = Modifier.height(16.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(modifier = Modifier.height(12.dp))
@@ -932,13 +955,11 @@ private fun DayDetailPanel(
             Spacer(modifier = Modifier.height(10.dp))
 
             if (!hasCalendarPermission) {
-                // ── Blurred locked state ─────────────────────────────────────
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(100.dp)
                 ) {
-                    // Blurred placeholder content behind the lock overlay
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -955,7 +976,7 @@ private fun DayDetailPanel(
                             )
                         }
                     }
-                    // Lock overlay
+
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -1002,7 +1023,13 @@ private fun DayDetailPanel(
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     calendarEvents.forEach { event ->
-                        CalendarEventRow(event = event, zone = zone)
+                        CalendarEventRow(
+                            event = event,
+                            zone = zone,
+                            canModify = hasCalendarWritePermission,
+                            onEdit = onEditCalendarEvent,
+                            onDelete = onDeleteCalendarEvent
+                        )
                     }
                 }
             }
@@ -1011,18 +1038,25 @@ private fun DayDetailPanel(
 }
 
 @Composable
-private fun CalendarEventRow(event: CalendarEvent, zone: ZoneId) {
+private fun CalendarEventRow(
+    event: CalendarEvent,
+    zone: ZoneId,
+    canModify: Boolean,
+    onEdit: (Long, String, Long, Long, Boolean) -> Unit,
+    onDelete: (Long) -> Unit
+) {
     val timeFormatter = DateTimeFormatter.ofPattern("h:mm a")
     val startTime = if (event.isAllDay) {
         "All day"
     } else {
         LocalTime.ofInstant(
-            java.time.Instant.ofEpochMilli(event.startMillis), zone
+            Instant.ofEpochMilli(event.startMillis), zone
         ).format(timeFormatter)
     }
 
-    // Use the event's calendar colour as a left-side accent strip
     val accentColor = if (event.color != 0) Color(event.color) else Purple
+    var showDeleteDialog by remember(event.id) { mutableStateOf(false) }
+    var showEditDialog by remember(event.id) { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
@@ -1033,7 +1067,6 @@ private fun CalendarEventRow(event: CalendarEvent, zone: ZoneId) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Colour strip
         Box(
             modifier = Modifier
                 .width(4.dp)
@@ -1041,6 +1074,7 @@ private fun CalendarEventRow(event: CalendarEvent, zone: ZoneId) {
                 .clip(RoundedCornerShape(2.dp))
                 .background(accentColor)
         )
+
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = event.title,
@@ -1054,12 +1088,234 @@ private fun CalendarEventRow(event: CalendarEvent, zone: ZoneId) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+
+        IconButton(
+            onClick = { if (canModify) showEditDialog = true },
+            enabled = canModify,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Edit,
+                contentDescription = "Edit calendar event",
+                tint = if (canModify) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        IconButton(
+            onClick = { if (canModify) showDeleteDialog = true },
+            enabled = canModify,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Delete calendar event",
+                tint = if (canModify) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete event?") },
+            text = { Text("This will remove the event from your device calendar.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDelete(event.id)
+                    showDeleteDialog = false
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showEditDialog) {
+        EditCalendarEventDialog(
+            event = event,
+            onDismiss = { showEditDialog = false },
+            onSave = { title, startMillis, endMillis, isAllDay ->
+                onEdit(event.id, title, startMillis, endMillis, isAllDay)
+                showEditDialog = false
+            }
+        )
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tip of the Visit
-// ---------------------------------------------------------------------------
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditCalendarEventDialog(
+    event: CalendarEvent,
+    onDismiss: () -> Unit,
+    onSave: (String, Long, Long, Boolean) -> Unit
+) {
+    var title by remember(event.id) { mutableStateOf(event.title) }
+    var isAllDay by remember(event.id) { mutableStateOf(event.isAllDay) }
+    var showDatePicker by remember(event.id) { mutableStateOf(false) }
+    var showTimePicker by remember(event.id) { mutableStateOf(false) }
+    var showInvalidTitle by remember(event.id) { mutableStateOf(false) }
+
+    val zone = ZoneId.systemDefault()
+    val startDateTime = remember(event.id) {
+        Instant.ofEpochMilli(event.startMillis).atZone(zone).toLocalDateTime()
+    }
+    var selectedDate by remember(event.id) { mutableStateOf(startDateTime.toLocalDate()) }
+    var selectedHour by remember(event.id) { mutableStateOf(startDateTime.hour) }
+    var selectedMinute by remember(event.id) { mutableStateOf(startDateTime.minute) }
+
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = selectedDate.atStartOfDay(zone).toInstant().toEpochMilli()
+    )
+    val timePickerState = rememberTimePickerState(
+        initialHour = selectedHour,
+        initialMinute = selectedMinute,
+        is24Hour = false
+    )
+
+    fun submit() {
+        val trimmedTitle = title.trim()
+        if (trimmedTitle.isBlank()) {
+            showInvalidTitle = true
+            return
+        }
+
+        val newStart = if (isAllDay) {
+            selectedDate.atStartOfDay(zone).toInstant().toEpochMilli()
+        } else {
+            LocalDateTime.of(selectedDate, LocalTime.of(selectedHour, selectedMinute))
+                .atZone(zone)
+                .toInstant()
+                .toEpochMilli()
+        }
+
+        val duration = (event.endMillis - event.startMillis).coerceAtLeast(60_000L)
+        val newEnd = if (isAllDay) {
+            selectedDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        } else {
+            newStart + duration
+        }
+
+        onSave(trimmedTitle, newStart, newEnd, isAllDay)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit event") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = title,
+                    onValueChange = {
+                        title = it
+                        if (showInvalidTitle && it.isNotBlank()) showInvalidTitle = false
+                    },
+                    label = { Text("Title") },
+                    singleLine = true,
+                    isError = showInvalidTitle,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Checkbox(checked = isAllDay, onCheckedChange = { isAllDay = it })
+                    Text("All day")
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { showDatePicker = true }) {
+                        Text(selectedDate.format(DateTimeFormatter.ofPattern("MMM d, yyyy")))
+                    }
+                    if (!isAllDay) {
+                        TextButton(onClick = { showTimePicker = true }) {
+                            Text(
+                                String.format(
+                                    Locale.getDefault(),
+                                    "%02d:%02d",
+                                    selectedHour,
+                                    selectedMinute
+                                )
+                            )
+                        }
+                    }
+                }
+
+                if (showInvalidTitle) {
+                    Text(
+                        text = "Title can't be empty.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { submit() }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        selectedDate = Instant.ofEpochMilli(millis).atZone(zone).toLocalDate()
+                    }
+                    showDatePicker = false
+                }) { Text("Confirm") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    if (showTimePicker) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showTimePicker = false }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Select time", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TimeInput(state = timePickerState)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+                        TextButton(onClick = {
+                            selectedHour = timePickerState.hour
+                            selectedMinute = timePickerState.minute
+                            showTimePicker = false
+                        }) { Text("Confirm") }
+                    }
+                }
+            }
+        }
+    }
+}
+
 private val APP_TIPS = listOf(
     "Assign a difficulty to every task — Easy, Medium, or Hard tasks award different XP amounts, so harder tasks are worth the extra push.",
     "Your daily streak resets if you skip a full day without completing any task. Even finishing one small Easy task keeps the streak alive.",

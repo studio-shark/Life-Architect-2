@@ -1,5 +1,7 @@
 package com.mirchevsky.lifearchitect2.data
 
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.database.ContentObserver
 import android.os.Handler
@@ -26,6 +28,13 @@ import java.time.ZoneId
  * calling any method.
  */
 class DeviceCalendarRepository(private val context: Context) {
+
+    data class EventUpdate(
+        val title: String,
+        val startMillis: Long,
+        val endMillis: Long,
+        val isAllDay: Boolean
+    )
 
     // ── Per-date event list ──────────────────────────────────────────────────
 
@@ -190,5 +199,64 @@ class DeviceCalendarRepository(private val context: Context) {
                 }
             } ?: emptySet()
         } catch (e: SecurityException) { emptySet() }
+    }
+
+    /**
+     * Updates an existing event in the device calendar provider by event id.
+     * Returns true if the provider reports at least one updated row.
+     *
+     * Requires WRITE_CALENDAR permission.
+     */
+    fun updateEvent(eventId: Long, update: EventUpdate): Boolean {
+        val values = ContentValues().apply {
+            put(CalendarContract.Events.TITLE, update.title)
+            put(CalendarContract.Events.ALL_DAY, if (update.isAllDay) 1 else 0)
+            if (update.isAllDay) {
+                val utcZone = ZoneId.of("UTC")
+                val day = Instant.ofEpochMilli(update.startMillis)
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDate()
+                val utcStart = day.atStartOfDay(utcZone).toInstant().toEpochMilli()
+                val utcEnd = day.plusDays(1).atStartOfDay(utcZone).toInstant().toEpochMilli()
+                put(CalendarContract.Events.DTSTART, utcStart)
+                put(CalendarContract.Events.DTEND, utcEnd)
+                put(CalendarContract.Events.EVENT_TIMEZONE, "UTC")
+            } else {
+                put(CalendarContract.Events.DTSTART, update.startMillis)
+                put(CalendarContract.Events.DTEND, update.endMillis)
+                put(CalendarContract.Events.EVENT_TIMEZONE, ZoneId.systemDefault().id)
+            }
+        }
+
+        return try {
+            val updated = context.contentResolver.update(
+                ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId),
+                values,
+                null,
+                null
+            )
+            updated > 0
+        } catch (e: SecurityException) {
+            false
+        }
+    }
+
+    /**
+     * Deletes an existing event in the device calendar provider by id.
+     * Returns true if at least one row was deleted.
+     *
+     * Requires WRITE_CALENDAR permission.
+     */
+    fun deleteEvent(eventId: Long): Boolean {
+        return try {
+            val deleted = context.contentResolver.delete(
+                ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId),
+                null,
+                null
+            )
+            deleted > 0
+        } catch (e: SecurityException) {
+            false
+        }
     }
 }
