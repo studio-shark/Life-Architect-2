@@ -8,35 +8,33 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.provider.Settings
-import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
+import androidx.core.text.BidiFormatter
 import com.mirchevsky.lifearchitect2.R
 import com.mirchevsky.lifearchitect2.data.db.AppDatabase
 import com.mirchevsky.lifearchitect2.data.db.entity.TaskEntity
-import kotlinx.coroutines.runBlocking
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.runBlocking
 
 class TaskWidgetProvider : AppWidgetProvider() {
 
     companion object {
-        const val ACTION_WIDGET_REFRESH    = "com.mirchevsky.lifearchitect2.WIDGET_REFRESH"
+        const val ACTION_WIDGET_REFRESH = "com.mirchevsky.lifearchitect2.WIDGET_REFRESH"
         const val ACTION_WIDGET_ROW_ACTION = "com.mirchevsky.lifearchitect2.WIDGET_ROW_ACTION"
 
-        const val EXTRA_TASK_ID    = "task_id"
+        const val EXTRA_TASK_ID = "task_id"
         const val EXTRA_ROW_ACTION = "row_action"
 
-        const val ROW_ACTION_COMPLETE     = "complete"
-        const val ROW_ACTION_TOGGLE_FLAG  = "toggle_flag"
-        const val ROW_ACTION_TOGGLE_PIN   = "toggle_pin"
+        const val ROW_ACTION_COMPLETE = "complete"
+        const val ROW_ACTION_TOGGLE_FLAG = "toggle_flag"
+        const val ROW_ACTION_TOGGLE_PIN = "toggle_pin"
 
-        private const val TAG = "TaskWidgetProvider"
-
-        private val COLOR_URGENT = Color.parseColor("#F87171") // Dark mode soft red
-        private val COLOR_PINNED = Color.parseColor("#FBBF24") // Dark mode amber
+        private val COLOR_URGENT = Color.parseColor("#F87171")
+        private val COLOR_PINNED = Color.parseColor("#FBBF24")
 
         fun sendRefreshBroadcast(context: Context) {
             val intent = Intent(ACTION_WIDGET_REFRESH)
@@ -83,7 +81,7 @@ class TaskWidgetProvider : AppWidgetProvider() {
                     return
                 }
 
-                val taskId    = intent.getStringExtra(EXTRA_TASK_ID)    ?: return
+                val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: return
                 val rowAction = intent.getStringExtra(EXTRA_ROW_ACTION) ?: return
 
                 val pendingResult = goAsync()
@@ -100,21 +98,23 @@ class TaskWidgetProvider : AppWidgetProvider() {
                             val updated = when (rowAction) {
                                 ROW_ACTION_COMPLETE -> {
                                     xpGained = when (task.difficulty.lowercase()) {
-                                        "easy"   -> 10
+                                        "easy" -> 10
                                         "medium" -> 20
-                                        "hard"   -> 35
-                                        else     -> 15
+                                        "hard" -> 35
+                                        else -> 15
                                     }
                                     task.copy(
                                         isCompleted = true,
-                                        status      = "completed",
+                                        status = "completed",
                                         completedAt = System.currentTimeMillis()
                                     )
                                 }
+
                                 ROW_ACTION_TOGGLE_FLAG -> task.copy(isUrgent = !task.isUrgent)
-                                ROW_ACTION_TOGGLE_PIN  -> task.copy(isPinned = !task.isPinned)
+                                ROW_ACTION_TOGGLE_PIN -> task.copy(isPinned = !task.isPinned)
                                 else -> null
                             }
+
                             if (updated != null) {
                                 runBlocking { dao.upsertTask(updated) }
                             }
@@ -220,14 +220,16 @@ class TaskWidgetProvider : AppWidgetProvider() {
     private fun buildTaskRow(context: Context, task: TaskEntity): RemoteViews {
         val layoutRes = when {
             task.isUrgent && task.isPinned -> R.layout.widget_task_item_urgent_pinned
-            task.isUrgent                  -> R.layout.widget_task_item_urgent
-            task.isPinned                  -> R.layout.widget_task_item_pinned
-            else                           -> R.layout.widget_task_item
+            task.isUrgent -> R.layout.widget_task_item_urgent
+            task.isPinned -> R.layout.widget_task_item_pinned
+            else -> R.layout.widget_task_item
         }
+
         val rv = RemoteViews(context.packageName, layoutRes)
         val colorIconInactive = context.getColor(R.color.widget_icon_inactive)
 
-        rv.setTextViewText(R.id.widget_item_title, task.title)
+        val safeTitle = BidiFormatter.getInstance().unicodeWrap(task.title)
+        rv.setTextViewText(R.id.widget_item_title, safeTitle)
 
         when {
             task.isUrgent -> rv.setTextColor(R.id.widget_item_title, COLOR_URGENT)
@@ -235,9 +237,9 @@ class TaskWidgetProvider : AppWidgetProvider() {
         }
 
         val flagTint = if (task.isUrgent) COLOR_URGENT else colorIconInactive
-        val pinTint  = if (task.isPinned) COLOR_PINNED else colorIconInactive
+        val pinTint = if (task.isPinned) COLOR_PINNED else colorIconInactive
         rv.setInt(R.id.widget_item_flag, "setColorFilter", flagTint)
-        rv.setInt(R.id.widget_item_pin,  "setColorFilter", pinTint)
+        rv.setInt(R.id.widget_item_pin, "setColorFilter", pinTint)
 
         val isEvent = task.status == "event"
         rv.setViewVisibility(R.id.widget_item_calendar, if (isEvent) View.VISIBLE else View.GONE)
@@ -247,29 +249,31 @@ class TaskWidgetProvider : AppWidgetProvider() {
 
         val dueDate = task.dueDate
         if (dueDate != null) {
-            val zone       = ZoneId.systemDefault()
+            val zone = ZoneId.systemDefault()
             val dueInstant = Instant.ofEpochMilli(dueDate)
-            val dueUtc     = dueInstant.atZone(ZoneOffset.UTC)
-            val isAllDay   = dueUtc.hour == 0 && dueUtc.minute == 0 && dueUtc.second == 0
-            val dueZdt     = dueInstant.atZone(zone)
-            val dueLocal   = dueZdt.toLocalDate()
-            val today      = java.time.LocalDate.now(zone)
+            val dueUtc = dueInstant.atZone(ZoneOffset.UTC)
+            val isAllDay = dueUtc.hour == 0 && dueUtc.minute == 0 && dueUtc.second == 0
+            val dueZdt = dueInstant.atZone(zone)
+            val dueLocal = dueZdt.toLocalDate()
+            val today = java.time.LocalDate.now(zone)
+
             val label = if (isAllDay) {
                 when (dueLocal) {
-                    today              -> "Today"
-                    today.plusDays(1)  -> "Tomorrow"
+                    today -> "Today"
+                    today.plusDays(1) -> "Tomorrow"
                     today.minusDays(1) -> "Yesterday"
-                    else               -> dueZdt.format(DateTimeFormatter.ofPattern("MMM d"))
+                    else -> dueZdt.format(DateTimeFormatter.ofPattern("MMM d"))
                 }
             } else {
                 val timePart = dueZdt.format(DateTimeFormatter.ofPattern("HH:mm"))
                 when (dueLocal) {
-                    today              -> "Today, $timePart"
-                    today.plusDays(1)  -> "Tomorrow, $timePart"
+                    today -> "Today, $timePart"
+                    today.plusDays(1) -> "Tomorrow, $timePart"
                     today.minusDays(1) -> "Yesterday, $timePart"
-                    else               -> dueZdt.format(DateTimeFormatter.ofPattern("MMM d, HH:mm"))
+                    else -> dueZdt.format(DateTimeFormatter.ofPattern("MMM d, HH:mm"))
                 }
             }
+
             rv.setTextViewText(R.id.widget_item_due, label)
             rv.setViewVisibility(R.id.widget_item_date_row, View.VISIBLE)
         } else {
@@ -277,15 +281,15 @@ class TaskWidgetProvider : AppWidgetProvider() {
         }
 
         rv.setOnClickFillInIntent(R.id.widget_item_dot, Intent().apply {
-            putExtra(EXTRA_TASK_ID,    task.id)
+            putExtra(EXTRA_TASK_ID, task.id)
             putExtra(EXTRA_ROW_ACTION, ROW_ACTION_COMPLETE)
         })
         rv.setOnClickFillInIntent(R.id.widget_item_flag, Intent().apply {
-            putExtra(EXTRA_TASK_ID,    task.id)
+            putExtra(EXTRA_TASK_ID, task.id)
             putExtra(EXTRA_ROW_ACTION, ROW_ACTION_TOGGLE_FLAG)
         })
         rv.setOnClickFillInIntent(R.id.widget_item_pin, Intent().apply {
-            putExtra(EXTRA_TASK_ID,    task.id)
+            putExtra(EXTRA_TASK_ID, task.id)
             putExtra(EXTRA_ROW_ACTION, ROW_ACTION_TOGGLE_PIN)
         })
 
