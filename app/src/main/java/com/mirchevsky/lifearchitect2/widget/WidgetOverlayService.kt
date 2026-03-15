@@ -117,6 +117,8 @@ import com.mirchevsky.lifearchitect2.R
 import com.mirchevsky.lifearchitect2.data.db.AppDatabase
 import com.mirchevsky.lifearchitect2.data.db.entity.TaskEntity
 import com.mirchevsky.lifearchitect2.ui.theme.AppTheme
+import com.mirchevsky.lifearchitect2.ui.theme.BrandGreen
+import com.mirchevsky.lifearchitect2.ui.theme.Purple
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.TimeZone
@@ -298,7 +300,10 @@ class WidgetOverlayService : Service() {
                                 overlayView?.let { view -> windowManager.removeView(view) }
                                 overlayView = null
                                 TaskWidgetProvider.sendRefreshBroadcast(applicationContext)
-                                showFeedbackOverlay(it)
+                                stopSelf()
+                                if (it.isNotBlank()) {
+                                    showFeedbackOverlay(it)
+                                }
                             }
                         )
                     }
@@ -310,14 +315,11 @@ class WidgetOverlayService : Service() {
     private fun removeOverlay() {
         overlayView?.let { windowManager.removeView(it) }
         overlayView = null
-        if (feedbackView == null) stopSelf()
+        stopSelf()
     }
 
     private fun showFeedbackOverlay(message: String) {
-        if (message.isBlank() || feedbackView != null) {
-            removeOverlay()
-            return
-        }
+        if (feedbackView != null) return
 
         val params =
             WindowManager.LayoutParams(
@@ -374,10 +376,11 @@ class WidgetOverlayService : Service() {
     @Composable
     private fun greenTextFieldColors() =
         OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color(0xFF10B981),
-            unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-            focusedLabelColor = Color(0xFF10B981),
-            cursorColor = Color(0xFF10B981),
+            focusedBorderColor = BrandGreen,
+            unfocusedBorderColor = BrandGreen,
+            focusedLabelColor = BrandGreen,
+            unfocusedLabelColor = BrandGreen,
+            cursorColor = BrandGreen,
             focusedContainerColor = overlayInputColor(),
             unfocusedContainerColor = overlayInputColor(),
             disabledContainerColor = overlayInputColor()
@@ -386,10 +389,11 @@ class WidgetOverlayService : Service() {
     @Composable
     private fun purpleTextFieldColors() =
         OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color(0xFF7C3AED),
-            unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-            focusedLabelColor = Color(0xFF7C3AED),
-            cursorColor = Color(0xFF7C3AED),
+            focusedBorderColor = Purple,
+            unfocusedBorderColor = Purple,
+            focusedLabelColor = Purple,
+            unfocusedLabelColor = Purple,
+            cursorColor = Purple,
             focusedContainerColor = overlayInputColor(),
             unfocusedContainerColor = overlayInputColor(),
             disabledContainerColor = overlayInputColor()
@@ -499,12 +503,17 @@ class WidgetOverlayService : Service() {
                 Box(
                     modifier =
                         Modifier.fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.30f))
+                            .background(Color.Black.copy(alpha = 0.35f))
                             .clickable(
                                 interactionSource = dismissInteraction,
-                                indication = null,
-                                onClick = onDismiss
-                            )
+                                indication = null
+                            ) {
+                                visible = false
+                                serviceScope.launch {
+                                    delay(220)
+                                    onDismiss()
+                                }
+                            }
                 )
                 Box(
                     modifier =
@@ -512,9 +521,8 @@ class WidgetOverlayService : Service() {
                             .fillMaxWidth()
                             .clickable(
                                 interactionSource = consumeInteraction,
-                                indication = null,
-                                onClick = {}
-                            )
+                                indication = null
+                            ) { }
                 ) {
                     when (mode) {
                         OverlayMode.ADD_TASK -> AddTaskPanel(onDismiss, onSaved)
@@ -979,7 +987,7 @@ class WidgetOverlayService : Service() {
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
                         ) {
-                            Text("Next: Set Time", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text("Set Time", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         }
                     }
                 }
